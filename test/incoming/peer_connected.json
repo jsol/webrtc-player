@@ -1,0 +1,18 @@
+{
+    "apiVersion": "1.0",
+    "method": "events:notify",
+    "params": {
+        "notification": {
+            "topic": "tns1:WebRTC/tnsaxis:Signaling/CloudEvent",
+            "timestamp": 1723639076101,
+            "message": {
+                "source": {},
+                "key": {},
+                "data": {
+                    "event": "{\"id\":\"bbfa13ee-66d8-42b1-8561-e17861301085\",\"source\":\"client\",\"specversion\":\"1.0\",\"type\":\"com.axis.webrtc.peer.connected\",\"subject\":\"BGaynd4dvgJimxBqf49AmgIdHhFN39Gimq6zTNFMlI5W8Bl2zScEqHHjEXgr6Pjv::auto_assigned\",\"time\":\"2024-08-14T12:37:56.101841040+00:00\"}",
+                    "eventType": "com.axis.webrtc.peer.connected"
+                }
+            }
+        }
+    }
+}

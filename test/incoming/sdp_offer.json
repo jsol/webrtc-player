@@ -1,0 +1,16 @@
+{
+  "type": "signaling",
+  "targetId": "B8A44F5682A8",
+  "orgId": null,
+  "data": {
+    "apiVersion": "1.0",
+    "sessionId": "4c7089a8-d5ca-47bd-9eb2-749417c27d80",
+    "type": "request",
+    "method": "setSdpOffer",
+    "params": {
+      "type": "offer",
+      "sdp": "sdp-content"
+    }
+  },
+  "correlationId": ""
+}

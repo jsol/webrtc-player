@@ -1,0 +1,18 @@
+{
+    "type": "initSession",
+    "targetId": "B8A44FB69350",
+    "correlationId": "ff0b5ddb-2ca2-423c-9e26-bc4004f93ffc",
+    "data": {
+        "apiVersion": "1.0",
+        "type": "request",
+        "method": "initSession",
+        "sessionId": "971eb7ba-7a4c-458f-96d7-d6d019c096cf",
+        "context": "85114bab-c638-4c57-8da8-6ffc37aa8342",
+        "params": {
+            "type": "live",
+            "videoReceive": {},
+            "audioReceive": {}
+        }
+    },
+    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MjQzMzEyMTAsIm5iZiI6MTcyNDMzMDkwNSwiaWF0IjoxNzI0MzMwOTEwfQ.VQrl3HwiSIc8YIfqc9MO1HV5gmfVFmSZ3EO57a-GyrA"
+}

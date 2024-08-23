@@ -1,0 +1,34 @@
+{
+    "type": "initSession",
+    "targetId": "B8A44F5682A8",
+    "correlationId": "f2841edd-1537-4426-9761-dec492a4fa7f",
+    "turnServers": [
+        {
+            "urls": [
+                "turn://bwscloud4g.ddns.bodyworn-dev.axis.cloud:3002?transport=tcp",
+                "turn://bwscloud4g.ddns.bodyworn-dev.axis.cloud:3002?transport=udp"
+            ],
+            "username": "1723748347:axis",
+            "password": "FNDlmSAZitmNUuLEFv8XU8AZ1iY="
+        }
+    ],
+    "stunServers": [
+        {
+            "urls": [
+                "stun://bwscloud4g.ddns.bodyworn-dev.axis.cloud:3002"
+            ]
+        }
+    ],
+    "data": {
+        "apiVersion": "1.0",
+        "type": "request",
+        "method": "initSession",
+        "sessionId": "4c7089a8-d5ca-47bd-9eb2-749417c27d80",
+        "context": "059d30fe-c6a2-4c04-a45f-9745c5a47e13",
+        "params": {
+            "type": "live",
+            "videoReceive": {},
+            "audioReceive": {}
+        }
+    }
+}

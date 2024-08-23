@@ -1,0 +1,17 @@
+{
+    "type": "signaling",
+    "targetId": "B8A44F5682A8",
+    "orgId": null,
+    "data": {
+        "apiVersion": "1.0",
+        "sessionId": "4c7089a8-d5ca-47bd-9eb2-749417c27d80",
+        "method": "addIceCandidate",
+        "type": "request",
+        "params": {
+            "candidate": "candidate:11 UDP 2015363327 100.64.0.127 49129 typ host",
+            "sdpMLineIndex": 1
+        },
+        "context": "1492972058"
+    },
+    "correlationId": ""
+}

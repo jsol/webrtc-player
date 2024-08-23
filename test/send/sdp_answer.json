@@ -1,0 +1,17 @@
+{
+    "type": "signaling",
+    "targetId": "B8A44FB69350",
+    "correlationId": "3f02e40b-95c4-4781-9122-293d228b8a15",
+    "data": {
+        "apiVersion": "1.0",
+        "type": "request",
+        "method": "setSdpAnswer",
+        "sessionId": "971eb7ba-7a4c-458f-96d7-d6d019c096cf",
+        "params": {
+            "type": "answer",
+            "sdp": "v=0\r\no=- 4657433810695400270 2 IN IP4 127.0.0.1\r\ns=-\r\nt=0 0\r\na=group:BUNDLE video0 audio1 application2\r\na=msid-semantic: WMS\r\nm=video 9 UDP/TLS/RTP/SAVPF 96 98\r\nc=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\na=ice-ufrag:wsGr\r\na=ice-pwd:dak8G0jjCdtadtOlmyVfXH3C\r\na=ice-options:trickle\r\na=fingerprint:sha-256 41:BA:99:82:F8:F3:3D:CA:2F:3C:7B:26:C5:CD:E1:2B:27:19:3E:C9:D0:07:2A:D4:AE:6F:C1:6C:2C:40:26:9A\r\na=setup:active\r\na=mid:video0\r\na=extmap:3 http://www.ietf.org/id/draft-holmer-rmcat-transport-wide-cc-extensions-01\r\na=recvonly\r\na=rtcp-mux\r\na=rtcp-rsize\r\na=rtpmap:96 H264/90000\r\na=rtcp-fb:96 transport-cc\r\na=rtcp-fb:96 ccm fir\r\na=rtcp-fb:96 nack\r\na=rtcp-fb:96 nack pli\r\na=fmtp:96 level-asymmetry-allowed=1;packetization-mode=1;profile-level-id=42e01f\r\na=rtpmap:98 rtx/90000\r\na=fmtp:98 apt=96\r\nm=audio 9 UDP/TLS/RTP/SAVPF 97\r\nc=IN IP4 0.0.0.0\r\na=rtcp:9 IN IP4 0.0.0.0\r\na=ice-ufrag:wsGr\r\na=ice-pwd:dak8G0jjCdtadtOlmyVfXH3C\r\na=ice-options:trickle\r\na=fingerprint:sha-256 41:BA:99:82:F8:F3:3D:CA:2F:3C:7B:26:C5:CD:E1:2B:27:19:3E:C9:D0:07:2A:D4:AE:6F:C1:6C:2C:40:26:9A\r\na=setup:active\r\na=mid:audio1\r\na=recvonly\r\na=rtcp-mux\r\na=rtpmap:97 OPUS/48000/2\r\na=rtcp-fb:97 transport-cc\r\na=fmtp:97 minptime=10;useinbandfec=1\r\nm=application 9 UDP/DTLS/SCTP webrtc-datachannel\r\nc=IN IP4 0.0.0.0\r\na=ice-ufrag:wsGr\r\na=ice-pwd:dak8G0jjCdtadtOlmyVfXH3C\r\na=ice-options:trickle\r\na=fingerprint:sha-256 41:BA:99:82:F8:F3:3D:CA:2F:3C:7B:26:C5:CD:E1:2B:27:19:3E:C9:D0:07:2A:D4:AE:6F:C1:6C:2C:40:26:9A\r\na=setup:active\r\na=mid:application2\r\na=sctp-port:5000\r\n"
+        },
+        "context": "740bcad1-903d-4743-b4c7-70318c057884"
+    },
+    "accessToken": "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MjQzMzEyMTAsIm5iZiI6MTcyNDMzMDkwNSwiaWF0IjoxNzI0MzMwOTEwfQ.VQrl3HwiSIc8YIfqc9MO1HV5gmfVFmSZ3EO57a-GyrA"
+}

@@ -1,0 +1,12 @@
+{
+    "apiVersion": "1.0",
+    "context": "0",
+    "method": "events:configure",
+    "params": {
+        "eventFilterList": [
+            {
+                "topicFilter": "tns1:WebRTC/tnsaxis:Signaling/tnsaxis:CloudEvent"
+            }
+        ]
+    }
+}
