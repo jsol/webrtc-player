@@ -6,7 +6,7 @@
 
 #define APP_ID "com.github.com.jsol.webrtc_player"
 
-#ifdef NO_FLAP
+#if ADW_MINOR_VERSION > 2 && ADW_MINOR_VERSION > 1
 GtkWidget *
 get_framed_content(GtkWidget *menu, GtkWidget *content)
 {
