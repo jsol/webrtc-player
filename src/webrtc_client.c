@@ -36,6 +36,7 @@ struct _WebrtcClient {
   SoupSession *session;
   SoupWebsocketConnection *client;
   SoupWebsocketConnection *data_stream;
+  GQueue *client_queue;
   GCancellable *cancel;
   gchar *server;
   gchar *user;
@@ -104,9 +105,18 @@ on_text_message(SoupWebsocketConnection *ws,
   case MSG_TYPE_RESPONSE:
     g_message("Response received");
     break;
-  case MSG_TYPE_HELLO:
+  case MSG_TYPE_HELLO: {
+    gchar *msg;
+
+    while ((msg = g_queue_pop_head(self->client_queue)) != NULL) {
+      soup_websocket_connection_send_text(self->client, msg);
+      g_free(msg);
+    }
+
     g_message("Hello received");
-    break;
+  }
+
+  break;
   case MSG_TYPE_PEER_CONNECTED:
     g_signal_emit(self,
                   client_signal_defs[SIG_NEW_PEER],
@@ -614,6 +624,7 @@ webrtc_client_finalize(GObject *obj)
   g_free(self->user);
   g_free(self->pass);
   g_free(self->server);
+  g_queue_free_full(self->client_queue, g_free);
 
   /* free stuff */
 
@@ -805,6 +816,7 @@ webrtc_client_init(G_GNUC_UNUSED WebrtcClient *self)
   SoupLogger *logger;
   g_assert(self);
 
+  self->client_queue = g_queue_new();
   self->session = soup_session_new();
   logger = soup_logger_new(SOUP_LOGGER_LOG_BODY);
   soup_session_add_feature(self->session, SOUP_SESSION_FEATURE(logger));
@@ -845,14 +857,17 @@ webrtc_client_init_session(WebrtcClient *self,
   g_return_val_if_fail(self != NULL, FALSE);
   g_return_val_if_fail(target != NULL, FALSE);
   g_return_val_if_fail(session_id != NULL, FALSE);
-  g_return_val_if_fail(self->client != NULL, FALSE);
   g_return_val_if_fail(self->token != NULL, FALSE);
 
   msg = message_create_init_session(target, session_id, self->token);
-  g_message("Sending msg %s", msg);
-  soup_websocket_connection_send_text(self->client, msg);
 
-  g_free(msg);
+  if (self->client != NULL) {
+    g_message("Sending msg %s", msg);
+    soup_websocket_connection_send_text(self->client, msg);
+    g_free(msg);
+  } else {
+    g_queue_push_tail(self->client_queue, msg);
+  }
 
   return TRUE;
 }
@@ -869,13 +884,17 @@ webrtc_client_send_sdp_answer(WebrtcClient *self,
   g_return_val_if_fail(target != NULL, FALSE);
   g_return_val_if_fail(session_id != NULL, FALSE);
   g_return_val_if_fail(sdp != NULL, FALSE);
-  g_return_val_if_fail(self->client != NULL, FALSE);
   g_return_val_if_fail(self->token != NULL, FALSE);
 
   msg = message_create_sdp_answer(target, session_id, sdp, self->token);
 
-  soup_websocket_connection_send_text(self->client, msg);
-  g_free(msg);
+  if (self->client != NULL) {
+    g_message("Sending msg %s", msg);
+    soup_websocket_connection_send_text(self->client, msg);
+    g_free(msg);
+  } else {
+    g_queue_push_tail(self->client_queue, msg);
+  }
 
   return TRUE;
 }
@@ -902,10 +921,13 @@ webrtc_client_send_ice_candidate(WebrtcClient *self,
                                      line_index,
                                      self->token);
 
-  g_message("Sending msg %s", msg);
-  soup_websocket_connection_send_text(self->client, msg);
-
-  g_free(msg);
+  if (self->client != NULL) {
+    g_message("Sending msg %s", msg);
+    soup_websocket_connection_send_text(self->client, msg);
+    g_free(msg);
+  } else {
+    g_queue_push_tail(self->client_queue, msg);
+  }
 
   return TRUE;
 }

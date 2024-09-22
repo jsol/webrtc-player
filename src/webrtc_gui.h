@@ -21,7 +21,11 @@ G_DECLARE_FINAL_TYPE(WebrtcGui, webrtc_gui, WEBRTC, GUI, GObject)
  */
 WebrtcGui *webrtc_gui_new(WebrtcClient *protocol);
 
-void webrtc_gui_add_paintable(WebrtcGui *self, GdkPaintable *paintable);
+void webrtc_gui_add_paintable(WebrtcGui *self,
+                              const gchar *id,
+                              GdkPaintable *paintable);
+
+void webrtc_gui_remove_paintable(WebrtcGui *self, const gchar *id);
 
 void webrtc_gui_activate(GtkApplication *app, G_GNUC_UNUSED gpointer user_data);
 

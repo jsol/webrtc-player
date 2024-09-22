@@ -36,5 +36,6 @@ void webrtc_session_add_element(WebrtcSession *self,
                                 GstElement *el);
 
 void webrtc_session_start(WebrtcSession *self);
+void webrtc_session_stop(WebrtcSession *self);
 
 G_END_DECLS

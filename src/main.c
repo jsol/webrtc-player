@@ -24,7 +24,7 @@ new_peer(G_GNUC_UNUSED GObject *source,
 }
 
 static GstElement *
-new_video_sink(struct app_ctx *ctx)
+new_video_sink(struct app_ctx *ctx, const gchar *id)
 {
   GdkPaintable *paintable = NULL;
   GstElement *video_sink;
@@ -42,7 +42,7 @@ new_video_sink(struct app_ctx *ctx)
   g_object_get(G_OBJECT(video_sink), "paintable", &paintable, NULL);
 
   g_print("Setting paintable \n");
-  webrtc_gui_add_paintable(ctx->gui, paintable);
+  webrtc_gui_add_paintable(ctx->gui, id, paintable);
 
   return video_sink;
 }
@@ -58,13 +58,38 @@ on_new_stream(G_GNUC_UNUSED GObject *source,
   WebrtcSession *sess;
 
   sess = webrtc_session_new(ctx->c, session_id, target);
-  video_sink = new_video_sink(ctx);
+  video_sink = new_video_sink(ctx, session_id);
   audio_sink = gst_element_factory_make("autoaudiosink", "audio-output");
 
   webrtc_session_add_element(sess, WEBRTC_SESSION_ELEM_VIDEO, video_sink);
   webrtc_session_add_element(sess, WEBRTC_SESSION_ELEM_AUDIO, audio_sink);
 
   webrtc_session_start(sess);
+
+  g_hash_table_insert(ctx->sessions, g_strdup(session_id), sess);
+}
+
+static void
+on_close_stream(G_GNUC_UNUSED GObject *source,
+                const gchar *target,
+                const gchar *session_id,
+                struct app_ctx *ctx)
+{
+  WebrtcSession *sess;
+
+  sess = g_hash_table_lookup(ctx->sessions, session_id);
+
+  if (sess == NULL) {
+    g_warning("Tried to close a session that did not exists: %s (%s)",
+              session_id,
+              target);
+    return;
+  }
+
+  webrtc_gui_remove_paintable(ctx->gui, session_id);
+  webrtc_session_stop(sess);
+
+  g_hash_table_remove(ctx->sessions, session_id);
 }
 
 int
@@ -77,6 +102,11 @@ main(int argc, char **argv)
     return 1;
   }
 
+  ctx.sessions = g_hash_table_new_full(g_str_hash,
+                                        g_str_equal,
+                                        g_free,
+                                        g_object_unref);
+
   ctx.c = webrtc_client_new(g_getenv("WEBRTC_HOST"),
                             g_getenv("WEBRTC_USER"),
                             g_getenv("WEBRTC_PASS"));
@@ -88,6 +118,7 @@ main(int argc, char **argv)
   webrtc_client_connect_async(ctx.c);
 
   g_signal_connect(ctx.gui, "new-stream", G_CALLBACK(on_new_stream), &ctx);
+  g_signal_connect(ctx.gui, "close-stream", G_CALLBACK(on_close_stream), &ctx);
 
   ctx.app = get_application();
 

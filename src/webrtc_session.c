@@ -10,6 +10,11 @@
 
 #define RTP_PAYLOAD_TYPE "96"
 
+struct signal {
+  gulong id;
+  GObject *obj;
+};
+
 struct _WebrtcSession {
   GObject parent;
 
@@ -27,9 +32,10 @@ struct _WebrtcSession {
   GstElement *audio_sink;
   GstElement *webrtc_bin;
   GstElement *pipeline;
+  GPtrArray *signals;
 };
 
-G_DEFINE_TYPE(WebrtcSession, webrtc_session, G_TYPE_OBJECT)
+G_DEFINE_TYPE(WebrtcSession, webrtc_session, G_TYPE_OBJECT);
 
 typedef enum {
   PROP_PROTOCOL = 1,
@@ -37,9 +43,27 @@ typedef enum {
   PROP_TARGET,
   N_PROPERTIES
 } WebrtcSessionProperty;
+
 static GParamSpec *obj_properties[N_PROPERTIES] = {
   NULL,
 };
+
+static void
+connect(GPtrArray *signals,
+        GObject *obj,
+        const gchar *sig,
+        GCallback cb,
+        gpointer user_data)
+{
+  struct signal *s;
+
+  s = g_malloc0(sizeof(*s));
+
+  s->id = g_signal_connect(obj, sig, cb, user_data);
+  s->obj = g_object_ref(obj);
+
+  g_ptr_array_add(signals, s);
+}
 
 static void
 on_new_server_list(G_GNUC_UNUSED WebrtcClient *source,
@@ -397,8 +421,6 @@ on_pad_decodebin_added(G_GNUC_UNUSED GstElement *element,
 
   g_object_set(self->webrtc_bin, "latency", 200, NULL);
   gst_bin_recalculate_latency(GST_BIN(self->pipeline));
-
-
 }
 
 static void
@@ -436,24 +458,28 @@ data_channel_on_message_string(G_GNUC_UNUSED GObject *dc,
 static void
 on_data_channel(G_GNUC_UNUSED GstElement *webrtc,
                 GObject *data_channel,
-                G_GNUC_UNUSED gpointer user_data)
+                WebrtcSession *self)
 {
-  g_signal_connect(data_channel,
-                   "on-error",
-                   G_CALLBACK(data_channel_on_error),
-                   NULL);
-  g_signal_connect(data_channel,
-                   "on-open",
-                   G_CALLBACK(data_channel_on_open),
-                   NULL);
-  g_signal_connect(data_channel,
-                   "on-close",
-                   G_CALLBACK(data_channel_on_close),
-                   NULL);
-  g_signal_connect(data_channel,
-                   "on-message-string",
-                   G_CALLBACK(data_channel_on_message_string),
-                   NULL);
+  connect(self->signals,
+          G_OBJECT(data_channel),
+          "on-error",
+          G_CALLBACK(data_channel_on_error),
+          NULL);
+  connect(self->signals,
+          G_OBJECT(data_channel),
+          "on-open",
+          G_CALLBACK(data_channel_on_open),
+          NULL);
+  connect(self->signals,
+          G_OBJECT(data_channel),
+          "on-close",
+          G_CALLBACK(data_channel_on_close),
+          NULL);
+  connect(self->signals,
+          G_OBJECT(data_channel),
+          "on-message-string",
+          G_CALLBACK(data_channel_on_message_string),
+          NULL);
 }
 
 static void
@@ -470,10 +496,11 @@ on_pad_added(G_GNUC_UNUSED GstElement *element, GstPad *pad, gpointer user_data)
   g_message("Linking decode bin");
 
   decodebin = gst_element_factory_make("decodebin", NULL);
-  g_signal_connect(decodebin,
-                   "pad-added",
-                   G_CALLBACK(on_pad_decodebin_added),
-                   self);
+  connect(self->signals,
+          G_OBJECT(decodebin),
+          "pad-added",
+          G_CALLBACK(on_pad_decodebin_added),
+          self);
   gst_bin_add(GST_BIN(self->pipeline), decodebin);
   gst_element_sync_state_with_parent(decodebin);
 
@@ -507,9 +534,10 @@ webrtc_session_finalize(GObject *obj)
 
   /* free stuff */
 
-  g_free(self->protocol);
+  g_clear_object(&self->protocol);
 
   g_free(self->id);
+  g_ptr_array_free(self->signals, TRUE);
 
   /* Always chain up to the parent finalize function to complete object
    * destruction. */
@@ -543,6 +571,7 @@ get_property(GObject *object,
     break;
   }
 }
+
 static void
 set_property(GObject *object,
              guint property_id,
@@ -556,17 +585,23 @@ set_property(GObject *object,
     g_clear_object(&self->protocol);
     self->protocol = g_value_dup_object(value);
 
-    g_signal_connect(self->protocol,
-                     "new-candidate",
-                     G_CALLBACK(on_new_candidate),
-                     self);
+    connect(self->signals,
+            G_OBJECT(self->protocol),
+            "new-candidate",
+            G_CALLBACK(on_new_candidate),
+            self);
 
-    g_signal_connect(self->protocol, "sdp", G_CALLBACK(on_sdp), self);
+    connect(self->signals,
+            G_OBJECT(self->protocol),
+            "sdp",
+            G_CALLBACK(on_sdp),
+            self);
 
-    g_signal_connect(self->protocol,
-                     "new-server-lists",
-                     G_CALLBACK(on_new_server_list),
-                     self);
+    connect(self->signals,
+            G_OBJECT(self->protocol),
+            "new-server-lists",
+            G_CALLBACK(on_new_server_list),
+            self);
     break;
   case PROP_ID:
     g_free(self->id);
@@ -618,11 +653,12 @@ webrtc_session_class_init(WebrtcSessionClass *klass)
 }
 
 static void
-webrtc_session_init(G_GNUC_UNUSED WebrtcSession *self)
+webrtc_session_init(WebrtcSession *self)
 {
   /* initialize all public and private members to reasonable default values.
    * They are all automatically initialized to 0 to begin with. */
 
+  self->signals = g_ptr_array_new_full(0, g_free);
   self->audio = g_ptr_array_new_full(0, g_object_unref);
   self->video = g_ptr_array_new_full(0, g_object_unref);
   self->mux = g_ptr_array_new_full(0, g_object_unref);
@@ -638,6 +674,10 @@ webrtc_session_init(G_GNUC_UNUSED WebrtcSession *self)
 WebrtcSession *
 webrtc_session_new(WebrtcClient *protocol, const gchar *id, const gchar *target)
 {
+  g_return_val_if_fail(protocol != NULL, NULL);
+  g_return_val_if_fail(id != NULL, NULL);
+  g_return_val_if_fail(target != NULL, NULL);
+
   return g_object_new(WEBRTC_TYPE_SESSION,
                       "protocol",
                       protocol,
@@ -728,7 +768,6 @@ webrtc_session_start(WebrtcSession *self)
                10000,
                NULL);
 
-
   // conv = gst_element_factory_make("videoconvert", "converter");
   // sink = gst_element_factory_make("gtk4paintablesink", "video-output");
 
@@ -755,10 +794,11 @@ webrtc_session_start(WebrtcSession *self)
     return;
   }
 
-  g_signal_connect(self->webrtc_bin,
-                   "on-ice-candidate",
-                   G_CALLBACK(on_ice_candidate_callback),
-                   self);
+  connect(self->signals,
+          G_OBJECT(self->webrtc_bin),
+          "on-ice-candidate",
+          G_CALLBACK(on_ice_candidate_callback),
+          self);
 
   bus = gst_pipeline_get_bus(GST_PIPELINE(pipeline));
   gst_bus_add_watch(bus, bus_call, self);
@@ -772,15 +812,17 @@ webrtc_session_start(WebrtcSession *self)
   g_print("Running...\n");
 
   gst_element_set_state(self->pipeline, GST_STATE_READY);
-  g_signal_connect(self->webrtc_bin,
-                   "on-data-channel",
-                   G_CALLBACK(on_data_channel),
-                   NULL);
+  connect(self->signals,
+          G_OBJECT(self->webrtc_bin),
+          "on-data-channel",
+          G_CALLBACK(on_data_channel),
+          self);
 
-  g_signal_connect(self->webrtc_bin,
-                   "pad-added",
-                   G_CALLBACK(on_pad_added),
-                   self);
+  connect(self->signals,
+          G_OBJECT(self->webrtc_bin),
+          "pad-added",
+          G_CALLBACK(on_pad_added),
+          self);
 
   webrtc_client_init_session(self->protocol, self->target, self->id);
   gst_element_set_state(self->pipeline, GST_STATE_PLAYING);
@@ -809,4 +851,24 @@ webrtc_session_check_plugins(void)
   }
 
   return ret;
+}
+
+void
+webrtc_session_stop(WebrtcSession *self)
+{
+  for (guint i = 0; i < self->signals->len; i++) {
+    struct signal *s;
+
+    s = (struct signal *) self->signals->pdata[i];
+
+    if (s->obj != NULL) {
+      g_signal_handler_disconnect(s->obj, s->id);
+      g_clear_object(&s->obj);
+    }
+  }
+
+  if (self->pipeline != NULL) {
+    gst_element_set_state(self->pipeline, GST_STATE_NULL);
+    g_clear_object(&self->pipeline);
+  }
 }

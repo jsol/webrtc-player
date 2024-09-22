@@ -24,7 +24,7 @@ deps_writer += dependency('gstreamer-sdp-1.0')
 deps_writer += dependency('gstreamer-pbutils-1.0')
 
 # Compiler flags
-extra_cflags = ['-W', '-Wformat=2', '-Winline',
+extra_cflags = ['-W', '-Wformat=2', '-Winline', '-ggdb',
                 '-Wstrict-prototypes', '-Wmissing-prototypes',
                 '-Wdisabled-optimization', '-Wfloat-equal', '-Wall',
                 '-Werror', '-Ddebug=false', '-Dstrip=true']

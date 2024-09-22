@@ -12,19 +12,16 @@ struct _WebrtcGui {
   GObject parent;
 
   GtkWidget *video;
+
+  GtkWidget *video_grid;
   GstElement *sink;
 
   GtkWidget *button_list;
 
   WebrtcClient *protocol;
+  GHashTable *videos;
 };
 
-/* FIXME
-Needs to be an AdwApplication OR just a GObject, maintaining a adw application,
-right now it segfaults.
-
-Seems to be an issue having both adw and gst thouugh...
-*/
 G_DEFINE_TYPE(WebrtcGui, webrtc_gui, G_TYPE_OBJECT)
 
 typedef enum { PROP_PROTOCOL = 1, N_PROPERTIES } WebrtcGuiProperty;
@@ -34,12 +31,13 @@ static GParamSpec *obj_properties[N_PROPERTIES] = {
 
 enum gui_signals {
   SIG_NEW_STREAM = 0,
+  SIG_CLOSE_STREAM,
   SIG_LAST,
 };
 static guint gui_signal_defs[SIG_LAST] = { 0 };
 
 static void
-on_button_press(GObject *button, WebrtcGui *self)
+on_activate(GObject *button, WebrtcGui *self)
 {
   const gchar *target;
   const gchar *session_id;
@@ -51,6 +49,18 @@ on_button_press(GObject *button, WebrtcGui *self)
 }
 
 static void
+on_deactivate(GObject *button, WebrtcGui *self)
+{
+  const gchar *target;
+  const gchar *session_id;
+
+  target = g_object_get_data(button, "target");
+  session_id = g_object_get_data(button, "session_id");
+
+  g_signal_emit(self, gui_signal_defs[SIG_CLOSE_STREAM], 0, target, session_id);
+}
+
+static void
 on_new_stream(G_GNUC_UNUSED WebrtcClient *source,
               struct stream_started *info,
               WebrtcGui *self)
@@ -58,6 +68,11 @@ on_new_stream(G_GNUC_UNUSED WebrtcClient *source,
   GtkWidget *button;
 
   button = gtk_button_new_with_label(info->bearer_name);
+  button = get_button(info->bearer_name,
+                      info->subject,
+                      G_CALLBACK(on_activate),
+                      G_CALLBACK(on_deactivate),
+                      self);
 
   g_object_set_data_full(G_OBJECT(button),
                          "target",
@@ -68,9 +83,7 @@ on_new_stream(G_GNUC_UNUSED WebrtcClient *source,
                          g_strdup(info->session_id),
                          g_free);
 
-  g_signal_connect(button, "clicked", G_CALLBACK(on_button_press), self);
-
-  gtk_box_append(GTK_BOX(self->button_list), button);
+  gtk_list_box_append(GTK_LIST_BOX(self->button_list), button);
 }
 
 static void
@@ -174,6 +187,20 @@ webrtc_gui_class_init(WebrtcGuiClass *klass)
                         new_stream_types /* param_types, or set to NULL */
           );
 
+  gui_signal_defs[SIG_CLOSE_STREAM] =
+          g_signal_newv("close-stream",
+                        G_TYPE_FROM_CLASS(object_class),
+                        G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE |
+                                G_SIGNAL_NO_HOOKS,
+                        NULL /* closure */,
+                        NULL /* accumulator */,
+                        NULL /* accumulator data */,
+                        NULL /* C marshaller */,
+                        G_TYPE_NONE /* return_type */,
+                        G_N_ELEMENTS(new_stream_types) /* n_params */,
+                        new_stream_types /* param_types, or set to NULL */
+          );
+
   obj_properties[PROP_PROTOCOL] =
           g_param_spec_object("protocol",
                               "Protocol",
@@ -185,10 +212,15 @@ webrtc_gui_class_init(WebrtcGuiClass *klass)
 }
 
 static void
-webrtc_gui_init(G_GNUC_UNUSED WebrtcGui *self)
+webrtc_gui_init(WebrtcGui *self)
 {
   /* initialize all public and private members to reasonable default values.
    * They are all automatically initialized to 0 to begin with. */
+
+  self->videos = g_hash_table_new_full(g_str_hash,
+                                       g_str_equal,
+                                       g_free,
+                                       g_object_unref);
 }
 
 WebrtcGui *
@@ -200,9 +232,39 @@ webrtc_gui_new(WebrtcClient *protocol)
 }
 
 void
-webrtc_gui_add_paintable(WebrtcGui *self, GdkPaintable *paintable)
+webrtc_gui_add_paintable(WebrtcGui *self,
+                         const gchar *id,
+                         GdkPaintable *paintable)
 {
-  gtk_picture_set_paintable(GTK_PICTURE(self->video), paintable);
+  GtkWidget *video;
+  GtkWidget *child;
+
+  child = gtk_flow_box_child_new();
+  video = gtk_picture_new();
+  gtk_widget_set_size_request(video, 640, 360);
+
+  gtk_flow_box_child_set_child(GTK_FLOW_BOX_CHILD(child), video);
+
+  gtk_flow_box_append(GTK_FLOW_BOX(self->video_grid), child);
+
+  gtk_picture_set_paintable(GTK_PICTURE(video), paintable);
+  g_hash_table_insert(self->videos, g_strdup(id), g_object_ref(child));
+}
+
+void
+webrtc_gui_remove_paintable(WebrtcGui *self, const gchar *id)
+{
+  GtkWidget *child;
+
+  child = g_hash_table_lookup(self->videos, id);
+
+  if (child == NULL) {
+    g_warning("Tried to close invalid paintable with id %s", id);
+    return;
+  }
+
+  g_hash_table_remove(self->videos, id);
+  gtk_flow_box_remove(GTK_FLOW_BOX(self->video_grid), child);
 }
 
 void
@@ -212,14 +274,13 @@ webrtc_gui_activate(GtkApplication *app, G_GNUC_UNUSED gpointer user_data)
 
   WebrtcGui *self = WEBRTC_GUI(user_data);
 
-  self->video = gtk_picture_new();
-  gtk_widget_set_size_request(self->video, 640, 360);
-
   g_print("Setting up rest of UI\n");
-  self->button_list = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+  /*self->button_list = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);*/
+  self->button_list = gtk_list_box_new();
+  self->video_grid = gtk_flow_box_new();
   window = get_window("WebRTC Player",
                       app,
-                      get_framed_content(self->button_list, self->video));
+                      get_framed_content(self->button_list, self->video_grid));
 
   /* Todo: Fix video grid */
   g_print("Showing window \n");

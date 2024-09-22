@@ -29,6 +29,7 @@ on_new_stream(G_GNUC_UNUSED GObject *source,
   GstElement *filesink;
   WebrtcSession *sess;
 
+  g_print("New stream: %p, %p\n", info, ctx);
   if (g_strcmp0(info->subject, ctx->target) != 0) {
     g_message("Device %s connected, waiting for %s",
               info->subject,
@@ -60,7 +61,7 @@ main(int argc, char **argv)
   ctx.target = g_strdup(g_getenv("WEBRTC_TARGET"));
 
   g_signal_connect(ctx.c, "new-peer", G_CALLBACK(new_peer), NULL);
-  g_signal_connect(ctx.c, "new-stream", G_CALLBACK(on_new_stream), NULL);
+  g_signal_connect(ctx.c, "new-stream", G_CALLBACK(on_new_stream), &ctx);
 
   webrtc_client_connect_async(ctx.c);
   ctx.loop = g_main_loop_new(NULL, FALSE);
