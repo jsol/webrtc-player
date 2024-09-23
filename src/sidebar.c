@@ -51,7 +51,7 @@ on_active_change(GObject *self,
                  G_GNUC_UNUSED GParamSpec *pspec,
                  gpointer user_data)
 {
-  void (*callback)(GObject*, gpointer);
+  void (*callback)(GObject *, gpointer);
 
   g_assert(self);
 
@@ -92,6 +92,66 @@ get_button(const gchar *title,
 
   return button;
 }
+
+#else
+
+static void
+on_active_change(GObject *self,
+                 G_GNUC_UNUSED GParamSpec *pspec,
+                 gpointer user_data)
+{
+  void (*callback)(GObject *, gpointer);
+
+  g_assert(self);
+
+  if (gtk_switch_get_active(GTK_SWITCH(self))) {
+    callback = g_object_get_data(self, "activate");
+  } else {
+    callback = g_object_get_data(self, "deactivate");
+  }
+  callback(self, user_data);
+}
+
+GtkWidget *
+get_button(const gchar *title,
+           const gchar *subtitle,
+           GCallback activate,
+           GCallback deactivate,
+           gpointer user_data)
+{
+  GtkWidget *onoff;
+  GtkWidget *row;
+
+  row = adw_action_row_new();
+  onoff = gtk_switch_new();
+
+  gtk_widget_set_valign(onoff, GTK_ALIGN_CENTER);
+  gtk_accessible_update_state(GTK_ACCESSIBLE(row),
+                              GTK_ACCESSIBLE_STATE_CHECKED,
+                              FALSE,
+                              -1);
+  gtk_widget_set_can_focus(onoff, FALSE);
+  gtk_list_box_row_set_activatable(GTK_LIST_BOX_ROW(row), TRUE);
+  adw_action_row_add_suffix(ADW_ACTION_ROW(row), onoff);
+  adw_action_row_set_activatable_widget(ADW_ACTION_ROW(row), onoff);
+
+  adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), title);
+  adw_preferences_row_set_title_selectable(ADW_PREFERENCES_ROW(row), TRUE);
+  if (subtitle) {
+    adw_action_row_set_subtitle(ADW_ACTION_ROW(row), subtitle);
+  }
+
+  g_object_set_data(G_OBJECT(onoff), "activate", activate);
+  g_object_set_data(G_OBJECT(onoff), "deactivate", deactivate);
+
+  g_signal_connect(onoff,
+                   "notify::active",
+                   G_CALLBACK(on_active_change),
+                   user_data);
+
+  return row;
+}
+
 #endif
 
 GtkWidget *
