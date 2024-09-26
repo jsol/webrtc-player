@@ -36,6 +36,7 @@ get_framed_content(GtkWidget *menu, GtkWidget *content)
   gtk_scrolled_window_set_min_content_width(GTK_SCROLLED_WINDOW(scroll), 250);
 
   flap = adw_flap_new();
+  gtk_widget_set_vexpand(scroll, TRUE);
 
   gtk_scrolled_window_set_child(GTK_SCROLLED_WINDOW(scroll), menu);
   adw_flap_set_flap(ADW_FLAP(flap), scroll);
@@ -66,6 +67,7 @@ on_active_change(GObject *self,
 GtkWidget *
 get_button(const gchar *title,
            const gchar *subtitle,
+           const gchar *session_id,
            GCallback activate,
            GCallback deactivate,
            gpointer user_data)
@@ -84,6 +86,15 @@ get_button(const gchar *title,
 
   g_object_set_data(G_OBJECT(button), "activate", activate);
   g_object_set_data(G_OBJECT(button), "deactivate", deactivate);
+
+  g_object_set_data_full(G_OBJECT(button),
+                         "target",
+                         g_strdup(subtitle),
+                         g_free);
+  g_object_set_data_full(G_OBJECT(button),
+                         "session_id",
+                         g_strdup(session_id),
+                         g_free);
 
   g_signal_connect(button,
                    "notify::active",
@@ -115,6 +126,7 @@ on_active_change(GObject *self,
 GtkWidget *
 get_button(const gchar *title,
            const gchar *subtitle,
+           const gchar *session_id,
            GCallback activate,
            GCallback deactivate,
            gpointer user_data)
@@ -143,6 +155,12 @@ get_button(const gchar *title,
 
   g_object_set_data(G_OBJECT(onoff), "activate", activate);
   g_object_set_data(G_OBJECT(onoff), "deactivate", deactivate);
+
+  g_object_set_data_full(G_OBJECT(onoff), "target", g_strdup(subtitle), g_free);
+  g_object_set_data_full(G_OBJECT(onoff),
+                         "session_id",
+                         g_strdup(session_id),
+                         g_free);
 
   g_signal_connect(onoff,
                    "notify::active",

@@ -571,6 +571,8 @@ message_create_init_session(const gchar *target,
   JsonObject *root;
   JsonObject *data;
   JsonObject *params;
+  JsonObject *video;
+  JsonObject *audio;
   gchar *context;
   gchar *correlation;
   gchar *msg;
@@ -601,10 +603,16 @@ message_create_init_session(const gchar *target,
   root = json_object_new();
   data = json_object_new();
   params = json_object_new();
+  video = json_object_new();
+  audio = json_object_new();
+
+  json_object_set_boolean_member(video, "adaptive", FALSE);
+
+  json_object_set_string_member(audio, "codec", "aac"); /* opus | aac */
 
   json_object_set_string_member(params, "type", "live");
-  json_object_set_object_member(params, "videoReceive", json_object_new());
-  json_object_set_object_member(params, "audioReceive", json_object_new());
+  json_object_set_object_member(params, "videoReceive", video);
+  json_object_set_object_member(params, "audioReceive", audio);
 
   json_object_set_string_member(data, "apiVersion", "1.0");
   json_object_set_string_member(data, "type", "request");

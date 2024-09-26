@@ -70,18 +70,11 @@ on_new_stream(G_GNUC_UNUSED WebrtcClient *source,
   button = gtk_button_new_with_label(info->bearer_name);
   button = get_button(info->bearer_name,
                       info->subject,
+                      info->session_id,
                       G_CALLBACK(on_activate),
                       G_CALLBACK(on_deactivate),
                       self);
 
-  g_object_set_data_full(G_OBJECT(button),
-                         "target",
-                         g_strdup(info->subject),
-                         g_free);
-  g_object_set_data_full(G_OBJECT(button),
-                         "session_id",
-                         g_strdup(info->session_id),
-                         g_free);
 
   gtk_list_box_append(GTK_LIST_BOX(self->button_list), button);
 }

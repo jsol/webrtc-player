@@ -142,6 +142,7 @@ on_text_message(SoupWebsocketConnection *ws,
     info.system_id = msg->data.new_stream.system_id;
     info.time = msg->data.new_stream.time;
     info.trigger_type = msg->data.new_stream.trigger_type;
+    g_print("Emitting stream started!\n");
     g_signal_emit(self, client_signal_defs[SIG_NEW_STREAM], 0, &info);
     break;
   }
@@ -348,15 +349,24 @@ parse_target(G_GNUC_UNUSED JsonArray *array,
   WebrtcClient *self = user_data;
   JsonObject *obj;
   struct stream_started info = { 0 };
+  const gchar *id;
 
   obj = json_node_get_object(element_node);
+  id = json_object_get_string_member(obj, "id");
+
+  if (id == NULL) {
+    g_warning("No id in target info");
+    return;
+  }
 
   if (!json_object_has_member(obj, "sessionId")) {
+    g_warning("No session id in target %s", id);
     return;
   }
 
   if (json_object_has_member(obj, "stopped") ||
       json_object_has_member(obj, "disconnected")) {
+    g_warning("Target %s is either stopped or disconnectedu", id);
     return;
   }
 
@@ -365,6 +375,8 @@ parse_target(G_GNUC_UNUSED JsonArray *array,
   info.session_id = json_object_get_string_member(obj, "sessionId");
   info.subject = json_object_get_string_member(obj, "id");
   info.time = json_object_get_string_member(obj, "started");
+
+  g_message("Emitting target %s", id);
 
   g_signal_emit(self, client_signal_defs[SIG_NEW_STREAM], 0, &info);
 }

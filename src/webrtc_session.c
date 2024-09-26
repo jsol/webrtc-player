@@ -435,8 +435,10 @@ data_channel_on_open(GObject *dc, G_GNUC_UNUSED gpointer user_data)
 {
   GBytes *bytes = g_bytes_new("data", strlen("data"));
   g_message("data channel opened\n");
+  /*
   g_signal_emit_by_name(dc, "send-string", "Hi! from GStreamer");
   g_signal_emit_by_name(dc, "send-data", bytes);
+  */
   g_bytes_unref(bytes);
 }
 
