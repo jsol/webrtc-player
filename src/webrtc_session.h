@@ -14,6 +14,11 @@ enum webrtc_session_elem_type {
   WEBRTC_SESSION_ELEM_MUX
 };
 
+enum webrtc_session_audio_codec {
+  WEBRTC_SESSION_AUDIO_CODEC_AAC = 0,
+  WEBRTC_SESSION_AUDIO_CODEC_OPUS
+};
+
 /*
  * Type declaration.
  */
@@ -24,8 +29,7 @@ G_DECLARE_FINAL_TYPE(WebrtcSession, webrtc_session, WEBRTC, SESSION, GObject)
 /*
  * Method definitions.
  */
-gboolean
-webrtc_session_check_plugins(void);
+gboolean webrtc_session_check_plugins(void);
 
 WebrtcSession *webrtc_session_new(WebrtcClient *protocol,
                                   const gchar *id,
@@ -38,4 +42,10 @@ void webrtc_session_add_element(WebrtcSession *self,
 void webrtc_session_start(WebrtcSession *self);
 void webrtc_session_stop(WebrtcSession *self);
 
+void webrtc_session_set_audio_codec(WebrtcSession *self,
+                                    enum webrtc_session_audio_codec codec);
+void webrtc_session_set_adaptive_bitrate(WebrtcSession *self, gboolean enabled);
+void webrtc_session_set_max_bitrate(WebrtcSession *self, gint val);
+void webrtc_session_set_compression(WebrtcSession *self, gint val);
+void webrtc_session_set_gop(WebrtcSession *self, gint val);
 G_END_DECLS

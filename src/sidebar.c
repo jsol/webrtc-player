@@ -6,6 +6,12 @@
 
 #define APP_ID "com.github.com.jsol.webrtc_player"
 
+static const gchar *audio_codec_list[] = { USE_DEFAULT, "aac", "opus", NULL };
+static const gchar *boolean_options_list[] = { USE_DEFAULT,
+                                               "disabled",
+                                               "enabled",
+                                               NULL };
+
 #if ADW_MINOR_VERSION >= 4 && ADW_MAJOR_VERSION >= 1
 GtkWidget *
 get_framed_content(GtkWidget *menu, GtkWidget *content)
@@ -172,10 +178,214 @@ get_button(const gchar *title,
 
 #endif
 
+static void
+on_selected_change(GObject *self,
+                   G_GNUC_UNUSED GParamSpec *pspec,
+                   gpointer user_data)
+{
+  GObject *app = G_OBJECT(user_data);
+  const gchar *name;
+  GObject *sel;
+
+  name = g_object_get_data(self, "pref_name");
+  sel = adw_combo_row_get_selected_item(ADW_COMBO_ROW(self));
+
+  g_object_set_data_full(app, name, g_object_ref(sel), g_object_unref);
+}
+
+static void
+add_pref_dropdown(AdwPreferencesGroup *group,
+                  GListModel *model,
+                  const gchar *title,
+                  const gchar *pref_name,
+                  gpointer data)
+{
+  GtkWidget *combo;
+
+  combo = adw_combo_row_new();
+  adw_combo_row_set_model(ADW_COMBO_ROW(combo), model);
+
+  adw_preferences_row_set_title(ADW_PREFERENCES_ROW(combo), title);
+  g_object_set_data(G_OBJECT(combo), "pref_name", (gchar *) pref_name);
+  g_signal_connect(combo,
+                   "notify::selected",
+                   G_CALLBACK(on_selected_change),
+                   data);
+
+  adw_preferences_group_add(group, combo);
+}
+
+static void
+numeric_input_changed(GtkEditable *input, GObject *app)
+{
+  const gchar *txt;
+  gint64 num;
+  gchar *end = NULL;
+  gint max;
+  gchar *tmp;
+  const gchar *name;
+
+  txt = gtk_editable_get_text(input);
+  name = g_object_get_data(G_OBJECT(input), "pref_name");
+  g_print("CHANGED: %s\n", txt);
+
+  if (strlen(txt) == 0) {
+    g_object_set_data(app, name, GINT_TO_POINTER(-1));
+    return;
+  }
+
+  num = g_ascii_strtoll(txt, &end, 10);
+
+  if (num < 0) {
+    g_warning("Invalid input: %lu", num);
+    gtk_editable_set_text(input, "");
+    return;
+  }
+
+  max = GPOINTER_TO_INT(g_object_get_data(G_OBJECT(input), "max_input"));
+  if (num > max) {
+    g_warning("Input too big: %lu", num);
+
+    tmp = g_strdup_printf("%d", max);
+
+    gtk_editable_set_text(input, tmp);
+
+    g_free(tmp);
+
+    return;
+  }
+
+  g_object_set_data(app, name, GINT_TO_POINTER(num));
+
+  tmp = g_strdup_printf("%d", (gint) num);
+  if (g_strcmp0(tmp, txt) != 0) {
+    gtk_editable_set_text(input, tmp);
+  }
+  g_free(tmp);
+}
+
+static void
+add_pref_number(AdwPreferencesGroup *group,
+                const gchar *title,
+                const gchar *pref_name,
+                gint max,
+                gpointer data)
+{
+  GtkWidget *input;
+
+  input = adw_entry_row_new();
+
+  adw_entry_row_set_input_purpose(ADW_ENTRY_ROW(input),
+                                  GTK_INPUT_PURPOSE_DIGITS);
+  adw_entry_row_set_show_apply_button(ADW_ENTRY_ROW(input), FALSE);
+
+  adw_preferences_row_set_title(ADW_PREFERENCES_ROW(input), title);
+
+  g_object_set_data(G_OBJECT(input), "pref_name", (gchar *) pref_name);
+  g_object_set_data(G_OBJECT(input), "max_input", GINT_TO_POINTER(max));
+
+  g_signal_connect(input, "changed", G_CALLBACK(numeric_input_changed), data);
+
+  adw_preferences_group_add(group, input);
+}
+
+static void
+pref_menu_cb(G_GNUC_UNUSED GSimpleAction *simple_action,
+             G_GNUC_UNUSED GVariant *parameter,
+             gpointer *data)
+{
+  GtkWidget *pref_window;
+  GtkWidget *pref_page;
+  GtkWidget *audio_pref_group;
+  GtkWidget *video_pref_group;
+  GtkStringList *codec_options;
+  GtkStringList *boolean_options;
+
+  boolean_options = gtk_string_list_new(boolean_options_list);
+
+  /* Setup audio preferences */
+
+  audio_pref_group = adw_preferences_group_new();
+
+  codec_options = gtk_string_list_new(audio_codec_list);
+
+  add_pref_dropdown(ADW_PREFERENCES_GROUP(audio_pref_group),
+                    G_LIST_MODEL(codec_options),
+                    "Codec",
+                    "codec",
+                    data);
+
+  adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(audio_pref_group),
+                                  "Audio settings");
+
+  /* Setup video preferences */
+
+  video_pref_group = adw_preferences_group_new();
+
+  add_pref_dropdown(ADW_PREFERENCES_GROUP(video_pref_group),
+                    G_LIST_MODEL(boolean_options),
+                    "Adaptive Bitrate",
+                    "adaptive",
+                    data);
+
+  add_pref_number(ADW_PREFERENCES_GROUP(video_pref_group),
+                  "Max Bitrate (Kbps)",
+                  "maxBitrateInKbps",
+                  20000000,
+                  data);
+
+  add_pref_number(ADW_PREFERENCES_GROUP(video_pref_group),
+                  "Compression (0-100)",
+                  "compression",
+                  100,
+                  data);
+
+  add_pref_number(ADW_PREFERENCES_GROUP(video_pref_group),
+                  "Key frame interval (GOP)",
+                  "keyframeInterval",
+                  600,
+                  data);
+
+  adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(video_pref_group),
+                                  "Video settings");
+
+  /* Show preference page */
+  pref_page = adw_preferences_page_new();
+  pref_window = adw_preferences_window_new();
+
+  adw_preferences_page_add(ADW_PREFERENCES_PAGE(pref_page),
+                           ADW_PREFERENCES_GROUP(audio_pref_group));
+  adw_preferences_page_add(ADW_PREFERENCES_PAGE(pref_page),
+                           ADW_PREFERENCES_GROUP(video_pref_group));
+
+  adw_preferences_window_add(ADW_PREFERENCES_WINDOW(pref_window),
+                             ADW_PREFERENCES_PAGE(pref_page));
+  gtk_window_present(GTK_WINDOW(pref_window));
+}
+
+static void
+build_app_menu(GtkMenuButton *menu_button, GtkApplication *app)
+{
+  GMenu *menubar = g_menu_new();
+  GMenuItem *menu_item_menu;
+  GSimpleAction *act;
+
+  menu_item_menu = g_menu_item_new("Preferences", "app.pref");
+  g_menu_append_item(menubar, menu_item_menu);
+  g_object_unref(menu_item_menu);
+
+  act = g_simple_action_new("pref", NULL);
+  g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(act));
+  g_signal_connect(act, "activate", G_CALLBACK(pref_menu_cb), app);
+
+  gtk_menu_button_set_menu_model((menu_button), G_MENU_MODEL(menubar));
+}
+
 GtkWidget *
 get_window(const gchar *title_str, GtkApplication *app, GtkWidget *content)
 {
   GtkWidget *title;
+  GtkWidget *pref_menu;
   GtkWidget *header;
   GtkWidget *window;
   GtkWidget *box;
@@ -184,8 +394,14 @@ get_window(const gchar *title_str, GtkApplication *app, GtkWidget *content)
   box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
 
   title = adw_window_title_new(title_str, NULL);
+  pref_menu = gtk_menu_button_new();
   header = adw_header_bar_new();
+
+  build_app_menu(GTK_MENU_BUTTON(pref_menu), app);
+
+  gtk_menu_button_set_direction(GTK_MENU_BUTTON(pref_menu), GTK_ARROW_NONE);
   adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), title);
+  adw_header_bar_pack_end(ADW_HEADER_BAR(header), pref_menu);
 
   gtk_box_append(GTK_BOX(box), header);
   gtk_box_append(GTK_BOX(box), content);

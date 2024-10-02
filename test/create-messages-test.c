@@ -146,13 +146,20 @@ test_create_init_session(void)
 {
   gchar *json;
   gchar *msg;
+  GHashTable *video_settings;
+  GHashTable *audio_settings;
 
   json = load_json_file("init_session");
   g_assert_true(json != NULL);
 
+  video_settings = g_hash_table_new(g_str_hash, g_str_equal);
+  audio_settings = g_hash_table_new(g_str_hash, g_str_equal);
+
   msg = message_create_init_session(
           "B8A44FB69350",
           "971eb7ba-7a4c-458f-96d7-d6d019c096cf",
+          video_settings,
+          audio_settings,
           "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3MjQzMzEyMTAsIm5iZiI6MTcyNDMzMDkwNSwiaWF0IjoxNzI0MzMwOTEwfQ.VQrl3HwiSIc8YIfqc9MO1HV5gmfVFmSZ3EO57a-GyrA");
 
   mask_json("correlationId", &msg, &json);
@@ -162,6 +169,8 @@ test_create_init_session(void)
 
   g_free(json);
   g_free(msg);
+  g_hash_table_unref(audio_settings);
+  g_hash_table_unref(video_settings);
 }
 
 void

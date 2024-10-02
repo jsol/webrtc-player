@@ -862,6 +862,8 @@ webrtc_client_connect_async(WebrtcClient *self)
 gboolean
 webrtc_client_init_session(WebrtcClient *self,
                            const gchar *target,
+                           const GHashTable *video_settings,
+                           const GHashTable *audio_settings,
                            const gchar *session_id)
 {
   gchar *msg;
@@ -871,7 +873,11 @@ webrtc_client_init_session(WebrtcClient *self,
   g_return_val_if_fail(session_id != NULL, FALSE);
   g_return_val_if_fail(self->token != NULL, FALSE);
 
-  msg = message_create_init_session(target, session_id, self->token);
+  msg = message_create_init_session(target,
+                                    session_id,
+                                    video_settings,
+                                    audio_settings,
+                                    self->token);
 
   if (self->client != NULL) {
     g_message("Sending msg %s", msg);

@@ -56,6 +56,9 @@ on_new_stream(G_GNUC_UNUSED GObject *source,
   GstElement *video_sink;
   GstElement *audio_sink;
   WebrtcSession *sess;
+  gchar *conf_str = NULL;
+  gint conf_int;
+  gboolean conf_bool;
 
   sess = webrtc_session_new(ctx->c, session_id, target);
   video_sink = new_video_sink(ctx, session_id);
@@ -63,6 +66,36 @@ on_new_stream(G_GNUC_UNUSED GObject *source,
 
   webrtc_session_add_element(sess, WEBRTC_SESSION_ELEM_VIDEO, video_sink);
   webrtc_session_add_element(sess, WEBRTC_SESSION_ELEM_AUDIO, audio_sink);
+
+  if (webrtc_gui_conf_adaptive(ctx->gui, &conf_bool)) {
+    g_message("Video adaptive bitrate %s", conf_bool ? "enabled" : "disabled");
+    webrtc_session_set_adaptive_bitrate(sess, conf_bool);
+  }
+
+  if (webrtc_gui_conf_codec(ctx->gui, &conf_str)) {
+    if (g_strcmp0(conf_str, "aac") == 0) {
+      g_message("Using audio codec AAC");
+      webrtc_session_set_audio_codec(sess, WEBRTC_SESSION_AUDIO_CODEC_AAC);
+    } else if (g_strcmp0(conf_str, "opus") == 0) {
+      g_message("Using audio codec OPUS");
+      webrtc_session_set_audio_codec(sess, WEBRTC_SESSION_AUDIO_CODEC_OPUS);
+    }
+  }
+
+  if (webrtc_gui_conf_compression(ctx->gui, &conf_int)) {
+    g_message("Video compression: %d%%", conf_int);
+    webrtc_session_set_compression(sess, conf_int);
+  }
+
+  if (webrtc_gui_conf_max_bitrate(ctx->gui, &conf_int)) {
+    g_message("Max bitrate: %d kbps", conf_int);
+    webrtc_session_set_max_bitrate(sess, conf_int);
+  }
+
+  if (webrtc_gui_conf_gop(ctx->gui, &conf_int)) {
+    g_message("Key fram interval: %d frames", conf_int);
+    webrtc_session_set_gop(sess, conf_int);
+  }
 
   webrtc_session_start(sess);
 
@@ -103,9 +136,9 @@ main(int argc, char **argv)
   }
 
   ctx.sessions = g_hash_table_new_full(g_str_hash,
-                                        g_str_equal,
-                                        g_free,
-                                        g_object_unref);
+                                       g_str_equal,
+                                       g_free,
+                                       g_object_unref);
 
   ctx.c = webrtc_client_new(g_getenv("WEBRTC_HOST"),
                             g_getenv("WEBRTC_USER"),

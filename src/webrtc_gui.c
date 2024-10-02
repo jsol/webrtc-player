@@ -20,6 +20,7 @@ struct _WebrtcGui {
 
   WebrtcClient *protocol;
   GHashTable *videos;
+  GObject *app;
 };
 
 G_DEFINE_TYPE(WebrtcGui, webrtc_gui, G_TYPE_OBJECT)
@@ -74,7 +75,6 @@ on_new_stream(G_GNUC_UNUSED WebrtcClient *source,
                       G_CALLBACK(on_activate),
                       G_CALLBACK(on_deactivate),
                       self);
-
 
   gtk_list_box_append(GTK_LIST_BOX(self->button_list), button);
 }
@@ -267,6 +267,8 @@ webrtc_gui_activate(GtkApplication *app, G_GNUC_UNUSED gpointer user_data)
 
   WebrtcGui *self = WEBRTC_GUI(user_data);
 
+  self->app = G_OBJECT(app);
+
   g_print("Setting up rest of UI\n");
   /*self->button_list = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);*/
   self->button_list = gtk_list_box_new();
@@ -280,4 +282,113 @@ webrtc_gui_activate(GtkApplication *app, G_GNUC_UNUSED gpointer user_data)
   gtk_window_set_default_size(GTK_WINDOW(window), 1200, 720);
   gtk_window_present(GTK_WINDOW(window));
   g_print("Done\n");
+}
+
+gboolean
+webrtc_gui_conf_codec(WebrtcGui *self, gchar **val)
+{
+  GtkStringObject *tmp;
+  const gchar *txt;
+
+  g_return_val_if_fail(self != NULL, FALSE);
+  g_return_val_if_fail(val != NULL, FALSE);
+  g_return_val_if_fail(*val == NULL, FALSE);
+
+  tmp = g_object_get_data(self->app, "codec");
+
+  if (tmp == NULL) {
+    return FALSE;
+  }
+
+  txt = gtk_string_object_get_string(tmp);
+
+  if (g_strcmp0(USE_DEFAULT, txt) == 0) {
+    return FALSE;
+  }
+
+  *val = g_strdup(txt);
+
+  return TRUE;
+}
+gboolean
+webrtc_gui_conf_adaptive(WebrtcGui *self, gboolean *val)
+{
+  GtkStringObject *tmp;
+  const gchar *txt;
+
+  g_return_val_if_fail(self != NULL, FALSE);
+  g_return_val_if_fail(val != NULL, FALSE);
+
+  tmp = g_object_get_data(self->app, "adaptive");
+
+  if (tmp == NULL) {
+    return FALSE;
+  }
+
+  txt = gtk_string_object_get_string(tmp);
+
+  if (g_strcmp0("enabled", txt) == 0) {
+    *val = TRUE;
+    return TRUE;
+  }
+
+  if (g_strcmp0("disabled", txt) == 0) {
+    *val = FALSE;
+    return TRUE;
+  }
+
+  return FALSE;
+}
+
+static gboolean
+get_numeric_config(WebrtcGui *self, const gchar *name, gint *val)
+{
+  gpointer tmp;
+  gint ret;
+
+  g_assert(name);
+  g_assert(val);
+
+  tmp = g_object_get_data(self->app, name);
+
+  if (tmp == NULL) {
+    return FALSE;
+  }
+
+  ret = GPOINTER_TO_INT(tmp);
+
+  if (ret < 0) {
+    return FALSE;
+  }
+
+  *val = ret;
+
+  return TRUE;
+}
+
+gboolean
+webrtc_gui_conf_compression(WebrtcGui *self, gint *val)
+{
+  g_return_val_if_fail(self != NULL, FALSE);
+  g_return_val_if_fail(val != NULL, FALSE);
+
+  return get_numeric_config(self, "compression", val);
+}
+
+gboolean
+webrtc_gui_conf_max_bitrate(WebrtcGui *self, gint *val)
+{
+  g_return_val_if_fail(self != NULL, FALSE);
+  g_return_val_if_fail(val != NULL, FALSE);
+
+  return get_numeric_config(self, "maxBitrateInKbps", val);
+}
+
+gboolean
+webrtc_gui_conf_gop(WebrtcGui *self, gint *val)
+{
+  g_return_val_if_fail(self != NULL, FALSE);
+  g_return_val_if_fail(val != NULL, FALSE);
+
+  return get_numeric_config(self, "keyframeInterval", val);
 }

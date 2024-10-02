@@ -5,6 +5,8 @@
 
 G_BEGIN_DECLS
 
+#define USE_DEFAULT "use default"
+
 GtkWidget *get_framed_content(GtkWidget *menu, GtkWidget *content);
 
 GtkWidget *

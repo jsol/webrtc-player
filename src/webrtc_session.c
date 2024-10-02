@@ -21,6 +21,8 @@ struct _WebrtcSession {
   WebrtcClient *protocol;
   gchar *id;
   gchar *target;
+  GHashTable *audio_settings;
+  GHashTable *video_settings;
   GPtrArray *video;
   GPtrArray *audio;
   GPtrArray *mux;
@@ -33,6 +35,7 @@ struct _WebrtcSession {
   GstElement *webrtc_bin;
   GstElement *pipeline;
   GPtrArray *signals;
+  GstPad *sinkpad;
 };
 
 G_DEFINE_TYPE(WebrtcSession, webrtc_session, G_TYPE_OBJECT);
@@ -335,6 +338,37 @@ on_ice_candidate_callback(G_GNUC_UNUSED GstElement *object,
 }
 
 static void
+add_all_elements(WebrtcSession *self, GPtrArray *elems)
+{
+  for (guint i = 0; i < elems->len; i++) {
+    gst_bin_add(GST_BIN(self->pipeline), GST_ELEMENT(elems->pdata[i]));
+    gst_element_sync_state_with_parent(GST_ELEMENT(elems->pdata[i]));
+
+    if (i > 0) {
+      gst_element_link(GST_ELEMENT(elems->pdata[i - 1]),
+                       GST_ELEMENT(elems->pdata[i]));
+    }
+  }
+}
+
+static void
+print_caps(const GstCaps *caps)
+{
+  GstStructure *s;
+  gchar *caps_str;
+  const gchar *name;
+
+  for (guint i = 0; i < gst_caps_get_size(caps); i++) {
+    s = gst_caps_get_structure(caps, i);
+    caps_str = gst_structure_to_string(s);
+    name = gst_structure_get_name(s);
+
+    g_message("Caps %s: %s", name, caps_str);
+    g_free(caps_str);
+  }
+}
+
+static void
 on_pad_decodebin_added(G_GNUC_UNUSED GstElement *element,
                        GstPad *pad,
                        gpointer user_data)
@@ -345,6 +379,7 @@ on_pad_decodebin_added(G_GNUC_UNUSED GstElement *element,
   GPtrArray *elems = NULL;
   const gchar *name;
   WebrtcSession *self = WEBRTC_SESSION(user_data);
+  const gchar *add_name = NULL;
 
   if (GST_PAD_DIRECTION(pad) != GST_PAD_SRC) {
     g_message("Pad not a source pad, returning");
@@ -361,66 +396,32 @@ on_pad_decodebin_added(G_GNUC_UNUSED GstElement *element,
   caps = gst_pad_get_current_caps(pad);
   name = gst_structure_get_name(gst_caps_get_structure(caps, 0));
 
-  if (g_str_has_prefix(name, "video")) {
-    g_message("Adding video pad");
+  print_caps(caps);
 
+  if (g_str_has_prefix(name, "video")) {
     if (self->use_video) {
+      add_name = "video";
       elems = self->video;
     }
   } else if (g_str_has_prefix(name, "audio")) {
-    g_message("Adding audio pad");
-
     if (self->use_audio) {
+      add_name = "audio";
       elems = self->audio;
     }
   }
 
   if (elems != NULL) {
-    for (guint i = 0; i < elems->len; i++) {
-      gst_bin_add(GST_BIN(self->pipeline), GST_ELEMENT(elems->pdata[i]));
-      gst_element_sync_state_with_parent(GST_ELEMENT(elems->pdata[i]));
-
-      if (i > 0) {
-        gst_element_link(GST_ELEMENT(elems->pdata[i - 1]),
-                         GST_ELEMENT(elems->pdata[i]));
-      }
-    }
-
+    g_message("Adding %s pad", add_name);
+    add_all_elements(self, elems);
     qpad = gst_element_get_static_pad(GST_ELEMENT(elems->pdata[0]), "sink");
 
     ret = gst_pad_link(pad, qpad);
     g_assert_cmphex(ret, ==, GST_PAD_LINK_OK);
   }
 
-  if (self->use_mux) {
-    elems = self->mux;
-    if (!self->mux_added) {
-      for (guint i = 0; i < elems->len; i++) {
-        gst_bin_add(GST_BIN(self->pipeline), GST_ELEMENT(elems->pdata[i]));
-        gst_element_sync_state_with_parent(GST_ELEMENT(elems->pdata[i]));
-        if (i > 0) {
-          gst_element_link(GST_ELEMENT(elems->pdata[i - 1]),
-                           GST_ELEMENT(elems->pdata[i]));
-        }
-      }
-      self->mux_added = TRUE;
-    }
-
-    if (g_str_has_prefix(name, "video")) {
-      qpad = gst_element_request_pad_simple(GST_ELEMENT(elems->pdata[0]),
-                                            "video_%u");
-      ret = gst_pad_link(pad, qpad);
-      g_assert_cmphex(ret, ==, GST_PAD_LINK_OK);
-    } else if (g_str_has_prefix(name, "audio")) {
-      qpad = gst_element_request_pad_simple(GST_ELEMENT(elems->pdata[0]),
-                                            "audio_%u");
-      ret = gst_pad_link(pad, qpad);
-      g_assert_cmphex(ret, ==, GST_PAD_LINK_OK);
-    }
-  }
-
   g_object_set(self->webrtc_bin, "latency", 200, NULL);
   gst_bin_recalculate_latency(GST_BIN(self->pipeline));
+  g_clear_pointer(&caps, gst_caps_unref);
 }
 
 static void
@@ -431,7 +432,8 @@ data_channel_on_error(G_GNUC_UNUSED GObject *dc,
 }
 
 static void
-data_channel_on_open(GObject *dc, G_GNUC_UNUSED gpointer user_data)
+data_channel_on_open(G_GNUC_UNUSED GObject *dc,
+                     G_GNUC_UNUSED gpointer user_data)
 {
   GBytes *bytes = g_bytes_new("data", strlen("data"));
   g_message("data channel opened\n");
@@ -485,6 +487,143 @@ on_data_channel(G_GNUC_UNUSED GstElement *webrtc,
 }
 
 static void
+new_payload_type_callback(G_GNUC_UNUSED GstElement *demux,
+                          guint pt,
+                          GstPad *pad,
+                          gpointer user_data)
+{
+  WebrtcSession *self = WEBRTC_SESSION(user_data);
+  GstPad *sinkpad;
+  GstPadLinkReturn ret;
+  GPtrArray *elems = NULL;
+  GstCaps *caps;
+  GstElement *rtpdepay;
+  GstElement *queue;
+  GstPad *srcpad;
+  GstElement *parse;
+
+  g_message("New payload type: %u", pt);
+
+  elems = self->mux;
+  if (!self->mux_added) {
+    g_message("Adding all MUX elements");
+    add_all_elements(self, elems);
+    self->mux_added = TRUE;
+  }
+
+  caps = gst_pad_get_current_caps(pad);
+  print_caps(caps);
+
+  if (pt == 96) {
+    g_message("Adding video pad link");
+    rtpdepay = gst_element_factory_make("rtph264depay", NULL);
+    queue = gst_element_factory_make("queue", NULL);
+    parse = gst_element_factory_make("h264parse", NULL);
+
+    gst_bin_add(GST_BIN(self->pipeline), rtpdepay);
+    gst_bin_add(GST_BIN(self->pipeline), queue);
+    gst_bin_add(GST_BIN(self->pipeline), parse);
+
+    gst_element_sync_state_with_parent(rtpdepay);
+    gst_element_sync_state_with_parent(queue);
+    gst_element_sync_state_with_parent(parse);
+
+    /* From rtpidentifier to rtpdepay */
+    sinkpad = gst_element_get_static_pad(rtpdepay, "sink");
+    ret = gst_pad_link(pad, sinkpad);
+    g_assert_cmphex(ret, ==, GST_PAD_LINK_OK);
+    gst_object_unref(sinkpad);
+
+    /* from rtpdepay to parse */
+    if (!gst_element_link(rtpdepay, parse)) {
+      g_warning("Could not link parser");
+    }
+
+    /* from parse to queue */
+    if (!gst_element_link(parse, queue)) {
+      g_warning("Could not link queue");
+    }
+
+    /* from queue to muxer */
+    srcpad = gst_element_get_static_pad(queue, "src");
+
+    if (self->sinkpad == NULL) {
+      sinkpad = gst_element_request_pad_simple(GST_ELEMENT(elems->pdata[0]),
+                                               "video_%u");
+      self->sinkpad =
+              gst_element_request_pad_simple(GST_ELEMENT(elems->pdata[0]),
+                                             "audio_%u");
+    } else {
+      sinkpad = self->sinkpad;
+    }
+
+    ret = gst_pad_link(srcpad, sinkpad);
+    g_assert_cmphex(ret, ==, GST_PAD_LINK_OK);
+    gst_object_unref(srcpad);
+    gst_object_unref(sinkpad);
+  } else if (pt == 97) {
+    g_message("Adding audio pad link");
+
+    rtpdepay = gst_element_factory_make("rtpopusdepay", NULL);
+    queue = gst_element_factory_make("queue", NULL);
+    parse = gst_element_factory_make("opusparse", NULL);
+
+    gst_bin_add(GST_BIN(self->pipeline), rtpdepay);
+    gst_bin_add(GST_BIN(self->pipeline), queue);
+    gst_bin_add(GST_BIN(self->pipeline), parse);
+
+    gst_element_sync_state_with_parent(rtpdepay);
+    gst_element_sync_state_with_parent(queue);
+    gst_element_sync_state_with_parent(parse);
+
+    /* From rtpidentifier to rtpdepay */
+    sinkpad = gst_element_get_static_pad(rtpdepay, "sink");
+    ret = gst_pad_link(pad, sinkpad);
+    g_assert_cmphex(ret, ==, GST_PAD_LINK_OK);
+    gst_object_unref(sinkpad);
+
+    /* from rtpdepay to parse */
+    if (!gst_element_link(rtpdepay, parse)) {
+      g_warning("Could not link parser");
+    }
+
+    /* from parse to queue */
+    if (!gst_element_link(parse, queue)) {
+      g_warning("Could not link queue");
+    }
+
+    /* from queue to muxer */
+    srcpad = gst_element_get_static_pad(queue, "src");
+
+    if (self->sinkpad == NULL) {
+      sinkpad = gst_element_request_pad_simple(GST_ELEMENT(elems->pdata[0]),
+                                               "audio_%u");
+      self->sinkpad =
+              gst_element_request_pad_simple(GST_ELEMENT(elems->pdata[0]),
+                                             "video_%u");
+    } else {
+      sinkpad = self->sinkpad;
+    }
+
+    if (sinkpad == NULL) {
+      g_warning("No audio sink pad!");
+      GstElement *fake = gst_element_factory_make("fakesink", NULL);
+      gst_bin_add(GST_BIN(self->pipeline), fake);
+      gst_element_sync_state_with_parent(fake);
+
+      sinkpad = gst_element_get_static_pad(fake, "sink");
+    }
+
+    ret = gst_pad_link(srcpad, sinkpad);
+    g_assert_cmphex(ret, ==, GST_PAD_LINK_OK);
+    gst_object_unref(srcpad);
+    gst_object_unref(sinkpad);
+  }
+
+  g_clear_pointer(&caps, gst_caps_unref);
+}
+
+static void
 on_pad_added(G_GNUC_UNUSED GstElement *element, GstPad *pad, gpointer user_data)
 {
   GstElement *decodebin;
@@ -495,14 +634,27 @@ on_pad_added(G_GNUC_UNUSED GstElement *element, GstPad *pad, gpointer user_data)
     g_message("Pad not a source pad, returning");
   }
 
-  g_message("Linking decode bin");
+  if (self->use_mux) {
+    g_message("Linking rtpptdemux bin");
+    decodebin = gst_element_factory_make("rtpptdemux", NULL);
 
-  decodebin = gst_element_factory_make("decodebin", NULL);
-  connect(self->signals,
-          G_OBJECT(decodebin),
-          "pad-added",
-          G_CALLBACK(on_pad_decodebin_added),
-          self);
+    connect(self->signals,
+            G_OBJECT(decodebin),
+            "new-payload-type",
+            G_CALLBACK(new_payload_type_callback),
+            self);
+
+  } else {
+    g_message("Linking decode bin");
+
+    decodebin = gst_element_factory_make("decodebin", NULL);
+    connect(self->signals,
+            G_OBJECT(decodebin),
+            "pad-added",
+            G_CALLBACK(on_pad_decodebin_added),
+            self);
+  }
+
   gst_bin_add(GST_BIN(self->pipeline), decodebin);
   gst_element_sync_state_with_parent(decodebin);
 
@@ -671,6 +823,17 @@ webrtc_session_init(WebrtcSession *self)
   g_ptr_array_add(self->audio, gst_element_factory_make("queue", NULL));
   g_ptr_array_add(self->audio, gst_element_factory_make("audioconvert", NULL));
   g_ptr_array_add(self->audio, gst_element_factory_make("audioresample", NULL));
+
+  self->audio_settings =
+          g_hash_table_new_full(g_str_hash,
+                                g_str_equal,
+                                NULL,
+                                (GDestroyNotify) g_variant_unref);
+  self->video_settings =
+          g_hash_table_new_full(g_str_hash,
+                                g_str_equal,
+                                NULL,
+                                (GDestroyNotify) g_variant_unref);
 }
 
 WebrtcSession *
@@ -826,7 +989,11 @@ webrtc_session_start(WebrtcSession *self)
           G_CALLBACK(on_pad_added),
           self);
 
-  webrtc_client_init_session(self->protocol, self->target, self->id);
+  webrtc_client_init_session(self->protocol,
+                             self->target,
+                             self->video_settings,
+                             self->audio_settings,
+                             self->id);
   gst_element_set_state(self->pipeline, GST_STATE_PLAYING);
 }
 
@@ -873,4 +1040,67 @@ webrtc_session_stop(WebrtcSession *self)
     gst_element_set_state(self->pipeline, GST_STATE_NULL);
     g_clear_object(&self->pipeline);
   }
+}
+
+void
+webrtc_session_set_audio_codec(WebrtcSession *self,
+                               enum webrtc_session_audio_codec codec)
+{
+  const gchar *tmp;
+
+  g_return_if_fail(self != NULL);
+
+  switch (codec) {
+  case WEBRTC_SESSION_AUDIO_CODEC_AAC:
+    tmp = "aac";
+    break;
+  case WEBRTC_SESSION_AUDIO_CODEC_OPUS:
+    tmp = "opus";
+    break;
+  default:
+    g_warning("Invalid codec setting");
+    return;
+  }
+
+  g_hash_table_insert(self->audio_settings, "codec", g_variant_new_string(tmp));
+}
+
+void
+webrtc_session_set_adaptive_bitrate(WebrtcSession *self, gboolean enabled)
+{
+  g_return_if_fail(self != NULL);
+
+  g_hash_table_insert(self->video_settings,
+                      "adaptive",
+                      g_variant_new_boolean(enabled));
+}
+
+void
+webrtc_session_set_max_bitrate(WebrtcSession *self, gint val)
+{
+  g_return_if_fail(self != NULL);
+
+  g_hash_table_insert(self->video_settings,
+                      "maxBitrateInKbps",
+                      g_variant_new_int32(val));
+}
+
+void
+webrtc_session_set_compression(WebrtcSession *self, gint val)
+{
+  g_return_if_fail(self != NULL);
+
+  g_hash_table_insert(self->video_settings,
+                      "compression",
+                      g_variant_new_int32(val));
+}
+
+void
+webrtc_session_set_gop(WebrtcSession *self, gint val)
+{
+  g_return_if_fail(self != NULL);
+
+  g_hash_table_insert(self->video_settings,
+                      "keyframeInterval",
+                      g_variant_new_int32(val));
 }

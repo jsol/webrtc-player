@@ -563,9 +563,53 @@ message_create_stream_filter(void)
   return msg;
 }
 
+static void
+apply_settings(JsonObject *dst,
+               const gchar *json_name,
+               const GHashTable *conf,
+               const gchar *setting_name)
+{
+  GVariant *tmp;
+
+  g_assert(dst);
+  g_assert(json_name);
+  g_assert(conf);
+  g_assert(setting_name);
+
+  tmp = g_hash_table_lookup((GHashTable *) conf, setting_name);
+
+  if (tmp == NULL) {
+    return;
+  }
+
+  switch (g_variant_classify(tmp)) {
+  case G_VARIANT_CLASS_STRING:
+    json_object_set_string_member(dst,
+                                  json_name,
+                                  g_variant_get_string(tmp, NULL));
+    break;
+
+  case G_VARIANT_CLASS_BOOLEAN:
+    json_object_set_boolean_member(dst, json_name, g_variant_get_boolean(tmp));
+    break;
+
+  case G_VARIANT_CLASS_INT32:
+    json_object_set_int_member(dst, json_name, g_variant_get_int32(tmp));
+    break;
+
+  case G_VARIANT_CLASS_INT64:
+    json_object_set_int_member(dst, json_name, g_variant_get_int64(tmp));
+    break;
+  default:
+    g_warning("Unhandled audio / video settings format!");
+  }
+}
+
 gchar *
 message_create_init_session(const gchar *target,
                             const gchar *session_id,
+                            const GHashTable *video_settings,
+                            const GHashTable *audio_settings,
                             const gchar *token)
 {
   JsonObject *root;
@@ -606,9 +650,8 @@ message_create_init_session(const gchar *target,
   video = json_object_new();
   audio = json_object_new();
 
-  json_object_set_boolean_member(video, "adaptive", FALSE);
-
-  json_object_set_string_member(audio, "codec", "aac"); /* opus | aac */
+  apply_settings(audio, "codec", audio_settings, "codec");
+  apply_settings(video, "adaptive", video_settings, "adaptive");
 
   json_object_set_string_member(params, "type", "live");
   json_object_set_object_member(params, "videoReceive", video);
@@ -708,11 +751,11 @@ message_create_ice_candidate(const gchar *target,
   params = json_object_new();
 
   json_object_set_string_member(params, "candidate", ice);
-  // json_object_set_string_member(params, "sdpMid", "video0"); // TODO, should
-  // not be needed with line_index
-  json_object_set_int_member(params, "sdpMLineIndex", (gint) line_index);
-  // json_object_set_string_member(params, "usernameFragment", "live"); // TODO,
+  // json_object_set_string_member(params, "sdpMid", "video0"); // TODO,
   // should not be needed with line_index
+  json_object_set_int_member(params, "sdpMLineIndex", (gint) line_index);
+  // json_object_set_string_member(params, "usernameFragment", "live"); //
+  // TODO, should not be needed with line_index
 
   json_object_set_string_member(data, "apiVersion", "1.0");
   json_object_set_string_member(data, "type", "request");

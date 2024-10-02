@@ -44,6 +44,8 @@ void webrtc_client_connect_async(WebrtcClient *self);
 
 gboolean webrtc_client_init_session(WebrtcClient *self,
                                     const gchar *target,
+                                    const GHashTable *video_settings,
+                                    const GHashTable *audio_settings,
                                     const gchar *session_id);
 
 gboolean webrtc_client_send_sdp_answer(WebrtcClient *self,

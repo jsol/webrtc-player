@@ -38,10 +38,15 @@ on_new_stream(G_GNUC_UNUSED GObject *source,
   }
 
   sess = webrtc_session_new(ctx->c, info->session_id, info->subject);
-  mux = gst_element_factory_make("mp4mux", "mux");
+
+  webrtc_session_set_adaptive_bitrate(sess, FALSE);
+  webrtc_session_set_audio_codec(sess, WEBRTC_SESSION_AUDIO_CODEC_OPUS);
+
+  mux = gst_element_factory_make("matroskamux", "mux");
   filesink = gst_element_factory_make("filesink", "filesink");
 
-  g_object_set(G_OBJECT(filesink), "location", "file.mp4", NULL);
+  g_object_set(G_OBJECT(mux), "streamable", TRUE, NULL);
+  g_object_set(G_OBJECT(filesink), "location", "file.mkv", NULL);
 
   webrtc_session_add_element(sess, WEBRTC_SESSION_ELEM_MUX, mux);
   webrtc_session_add_element(sess, WEBRTC_SESSION_ELEM_MUX, filesink);
