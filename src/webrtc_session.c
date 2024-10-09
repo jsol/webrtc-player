@@ -502,10 +502,15 @@ new_payload_type_callback(G_GNUC_UNUSED GstElement *demux,
   GstPad *srcpad;
   GstElement *parse;
 
+  const gchar *audio = "audio_%u";
+  const gchar *video = "video_%u";
+  const gchar *sink_name;
+  const gchar *other_sink_name;
+
   g_message("New payload type: %u", pt);
 
   elems = self->mux;
-  if (!self->mux_added) {
+  if (!self->mux_added && self->use_mux) {
     g_message("Adding all MUX elements");
     add_all_elements(self, elems);
     self->mux_added = TRUE;
@@ -519,106 +524,58 @@ new_payload_type_callback(G_GNUC_UNUSED GstElement *demux,
     rtpdepay = gst_element_factory_make("rtph264depay", NULL);
     queue = gst_element_factory_make("queue", NULL);
     parse = gst_element_factory_make("h264parse", NULL);
-
-    gst_bin_add(GST_BIN(self->pipeline), rtpdepay);
-    gst_bin_add(GST_BIN(self->pipeline), queue);
-    gst_bin_add(GST_BIN(self->pipeline), parse);
-
-    gst_element_sync_state_with_parent(rtpdepay);
-    gst_element_sync_state_with_parent(queue);
-    gst_element_sync_state_with_parent(parse);
-
-    /* From rtpidentifier to rtpdepay */
-    sinkpad = gst_element_get_static_pad(rtpdepay, "sink");
-    ret = gst_pad_link(pad, sinkpad);
-    g_assert_cmphex(ret, ==, GST_PAD_LINK_OK);
-    gst_object_unref(sinkpad);
-
-    /* from rtpdepay to parse */
-    if (!gst_element_link(rtpdepay, parse)) {
-      g_warning("Could not link parser");
-    }
-
-    /* from parse to queue */
-    if (!gst_element_link(parse, queue)) {
-      g_warning("Could not link queue");
-    }
-
-    /* from queue to muxer */
-    srcpad = gst_element_get_static_pad(queue, "src");
-
-    if (self->sinkpad == NULL) {
-      sinkpad = gst_element_request_pad_simple(GST_ELEMENT(elems->pdata[0]),
-                                               "video_%u");
-      self->sinkpad =
-              gst_element_request_pad_simple(GST_ELEMENT(elems->pdata[0]),
-                                             "audio_%u");
-    } else {
-      sinkpad = self->sinkpad;
-    }
-
-    ret = gst_pad_link(srcpad, sinkpad);
-    g_assert_cmphex(ret, ==, GST_PAD_LINK_OK);
-    gst_object_unref(srcpad);
-    gst_object_unref(sinkpad);
+    sink_name = video;
+    other_sink_name = audio;
   } else if (pt == 97) {
     g_message("Adding audio pad link");
 
     rtpdepay = gst_element_factory_make("rtpopusdepay", NULL);
     queue = gst_element_factory_make("queue", NULL);
     parse = gst_element_factory_make("opusparse", NULL);
-
-    gst_bin_add(GST_BIN(self->pipeline), rtpdepay);
-    gst_bin_add(GST_BIN(self->pipeline), queue);
-    gst_bin_add(GST_BIN(self->pipeline), parse);
-
-    gst_element_sync_state_with_parent(rtpdepay);
-    gst_element_sync_state_with_parent(queue);
-    gst_element_sync_state_with_parent(parse);
-
-    /* From rtpidentifier to rtpdepay */
-    sinkpad = gst_element_get_static_pad(rtpdepay, "sink");
-    ret = gst_pad_link(pad, sinkpad);
-    g_assert_cmphex(ret, ==, GST_PAD_LINK_OK);
-    gst_object_unref(sinkpad);
-
-    /* from rtpdepay to parse */
-    if (!gst_element_link(rtpdepay, parse)) {
-      g_warning("Could not link parser");
-    }
-
-    /* from parse to queue */
-    if (!gst_element_link(parse, queue)) {
-      g_warning("Could not link queue");
-    }
-
-    /* from queue to muxer */
-    srcpad = gst_element_get_static_pad(queue, "src");
-
-    if (self->sinkpad == NULL) {
-      sinkpad = gst_element_request_pad_simple(GST_ELEMENT(elems->pdata[0]),
-                                               "audio_%u");
-      self->sinkpad =
-              gst_element_request_pad_simple(GST_ELEMENT(elems->pdata[0]),
-                                             "video_%u");
-    } else {
-      sinkpad = self->sinkpad;
-    }
-
-    if (sinkpad == NULL) {
-      g_warning("No audio sink pad!");
-      GstElement *fake = gst_element_factory_make("fakesink", NULL);
-      gst_bin_add(GST_BIN(self->pipeline), fake);
-      gst_element_sync_state_with_parent(fake);
-
-      sinkpad = gst_element_get_static_pad(fake, "sink");
-    }
-
-    ret = gst_pad_link(srcpad, sinkpad);
-    g_assert_cmphex(ret, ==, GST_PAD_LINK_OK);
-    gst_object_unref(srcpad);
-    gst_object_unref(sinkpad);
+    sink_name = audio;
+    other_sink_name = video;
   }
+
+  gst_bin_add(GST_BIN(self->pipeline), rtpdepay);
+  gst_bin_add(GST_BIN(self->pipeline), queue);
+  gst_bin_add(GST_BIN(self->pipeline), parse);
+
+  gst_element_sync_state_with_parent(rtpdepay);
+  gst_element_sync_state_with_parent(queue);
+  gst_element_sync_state_with_parent(parse);
+
+  /* From rtpidentifier to rtpdepay */
+  sinkpad = gst_element_get_static_pad(rtpdepay, "sink");
+  ret = gst_pad_link(pad, sinkpad);
+  g_assert_cmphex(ret, ==, GST_PAD_LINK_OK);
+  gst_object_unref(sinkpad);
+
+  /* from rtpdepay to parse */
+  if (!gst_element_link(rtpdepay, parse)) {
+    g_warning("Could not link parser");
+  }
+
+  /* from parse to queue */
+  if (!gst_element_link(parse, queue)) {
+    g_warning("Could not link queue");
+  }
+
+  /* from queue to muxer */
+  srcpad = gst_element_get_static_pad(queue, "src");
+
+  if (self->sinkpad == NULL) {
+    sinkpad = gst_element_request_pad_simple(GST_ELEMENT(elems->pdata[0]),
+                                             sink_name);
+    self->sinkpad = gst_element_request_pad_simple(GST_ELEMENT(elems->pdata[0]),
+                                                   other_sink_name);
+  } else {
+    sinkpad = self->sinkpad;
+  }
+
+  ret = gst_pad_link(srcpad, sinkpad);
+  g_assert_cmphex(ret, ==, GST_PAD_LINK_OK);
+  gst_object_unref(srcpad);
+  gst_object_unref(sinkpad);
 
   g_clear_pointer(&caps, gst_caps_unref);
 }
@@ -929,8 +886,7 @@ webrtc_session_start(WebrtcSession *self)
   g_object_set(self->webrtc_bin,
                "bundle-policy",
                GST_WEBRTC_BUNDLE_POLICY_MAX_BUNDLE,
-               "latency",
-               10000,
+
                NULL);
 
   // conv = gst_element_factory_make("videoconvert", "converter");
@@ -972,9 +928,6 @@ webrtc_session_start(WebrtcSession *self)
   set_transceiver(self);
 
   gst_bin_add(GST_BIN(pipeline), self->webrtc_bin);
-
-  /* Iterate */
-  g_print("Running...\n");
 
   gst_element_set_state(self->pipeline, GST_STATE_READY);
   connect(self->signals,
