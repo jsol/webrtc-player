@@ -39,7 +39,7 @@ void webrtc_session_add_element(WebrtcSession *self,
                                 enum webrtc_session_elem_type type,
                                 GstElement *el);
 
-void webrtc_session_start(WebrtcSession *self);
+void webrtc_session_start(WebrtcSession *self, gboolean stat_file);
 void webrtc_session_stop(WebrtcSession *self);
 
 void webrtc_session_set_audio_codec(WebrtcSession *self,
@@ -48,4 +48,6 @@ void webrtc_session_set_adaptive_bitrate(WebrtcSession *self, gboolean enabled);
 void webrtc_session_set_max_bitrate(WebrtcSession *self, gint val);
 void webrtc_session_set_compression(WebrtcSession *self, gint val);
 void webrtc_session_set_gop(WebrtcSession *self, gint val);
+
+const gchar * webrtc_session_get_id(WebrtcSession *self);
 G_END_DECLS

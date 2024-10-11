@@ -21,6 +21,7 @@ struct _WebrtcGui {
   WebrtcClient *protocol;
   GHashTable *videos;
   GObject *app;
+  GHashTable *buttons;
 };
 
 G_DEFINE_TYPE(WebrtcGui, webrtc_gui, G_TYPE_OBJECT)
@@ -68,6 +69,9 @@ on_new_stream(G_GNUC_UNUSED WebrtcClient *source,
 {
   GtkWidget *button;
 
+  g_assert(self);
+  g_assert(info);
+
   button = gtk_button_new_with_label(info->bearer_name);
   button = get_button(info->bearer_name,
                       info->subject,
@@ -77,6 +81,29 @@ on_new_stream(G_GNUC_UNUSED WebrtcClient *source,
                       self);
 
   gtk_list_box_append(GTK_LIST_BOX(self->button_list), button);
+  g_hash_table_insert(self->buttons,
+                      g_strdup(info->session_id),
+                      g_object_ref(button));
+}
+
+static void
+on_stream_end(G_GNUC_UNUSED WebrtcClient *source,
+              struct stream_started *info,
+              WebrtcGui *self)
+{
+  GtkWidget *button;
+
+  g_assert(self);
+  g_assert(info);
+
+  button = g_hash_table_lookup(self->buttons, info->session_id);
+
+  if (button == NULL) {
+    return;
+  }
+
+  gtk_list_box_remove(GTK_LIST_BOX(self->button_list), button);
+  g_hash_table_remove(self->buttons, info->session_id);
 }
 
 static void
@@ -89,6 +116,9 @@ webrtc_gui_dispose(GObject *obj)
   /* Do unrefs of objects and such. The object might be used after dispose,
    * and dispose might be called several times on the same object
    */
+
+  g_clear_object(&self->videos);
+  g_clear_object(&self->buttons);
 
   /* Always chain up to the parent dispose function to complete object
    * destruction. */
@@ -146,6 +176,10 @@ set_property(GObject *object,
     g_signal_connect(self->protocol,
                      "new-stream",
                      G_CALLBACK(on_new_stream),
+                     self);
+    g_signal_connect(self->protocol,
+                     "remove-stream",
+                     G_CALLBACK(on_stream_end),
                      self);
     break;
   default:
@@ -214,6 +248,10 @@ webrtc_gui_init(WebrtcGui *self)
                                        g_str_equal,
                                        g_free,
                                        g_object_unref);
+  self->buttons = g_hash_table_new_full(g_str_hash,
+                                        g_str_equal,
+                                        g_free,
+                                        g_object_unref);
 }
 
 WebrtcGui *

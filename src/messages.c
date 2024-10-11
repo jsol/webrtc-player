@@ -3,9 +3,11 @@
 
 #include "messages.h"
 
-#define EVENT_TOPIC         "tns1:WebRTC/tnsaxis:Signaling/CloudEvent"
-#define TYPE_PEER_CONNECTED "com.axis.webrtc.peer.connected"
-#define TYPE_STREAM_STARTED "com.axis.bodyworn.stream.started"
+#define EVENT_TOPIC            "tns1:WebRTC/tnsaxis:Signaling/CloudEvent"
+#define TYPE_PEER_CONNECTED    "com.axis.webrtc.peer.connected"
+#define TYPE_PEER_DISCONNECTED "com.axis.webrtc.peer.disconnected"
+#define TYPE_STREAM_STARTED    "com.axis.bodyworn.stream.started"
+#define TYPE_STREAM_STOPPED    "com.axis.bodyworn.stream.stopped"
 
 struct parse_url_ctx {
   GStrvBuilder *list;
@@ -313,6 +315,67 @@ out:
 }
 
 static message_t *
+parse_stream_stopped(const gchar *msg, GError **err)
+{
+  JsonParser *parser = NULL;
+  JsonNode *root;
+  JsonObject *obj;
+  JsonObject *data;
+  message_t *res;
+
+  parser = json_parser_new();
+
+  if (!json_parser_load_from_data(parser, msg, strlen(msg), err)) {
+    return NULL;
+  }
+
+  root = json_parser_get_root(parser);
+  if (root == NULL) {
+    g_warning("Failed to get a root node from string %s", msg);
+    goto out;
+  }
+
+  if (!JSON_NODE_HOLDS_OBJECT(root)) {
+    g_warning("Bad JSON message received");
+    goto out;
+  }
+
+  obj = json_node_get_object(root);
+  data = json_object_get_object_member(obj, "data");
+
+  res = g_malloc0(sizeof(*res));
+  res->type = MSG_TYPE_STREAM_STOPPED;
+
+  res->session_id = g_strdup(json_object_get_string_member(data, "sessionId"));
+  res->target = g_strdup(json_object_get_string_member(obj, "subject"));
+
+  res->data.end_stream.source =
+          g_strdup(json_object_get_string_member(obj, "source"));
+  res->data.end_stream.subject =
+          g_strdup(json_object_get_string_member(obj, "subject"));
+  res->data.end_stream.time =
+          g_strdup(json_object_get_string_member(obj, "time"));
+
+  res->data.end_stream.trigger_type =
+          g_strdup(json_object_get_string_member(data, "triggerType"));
+  res->data.end_stream.bearer_id =
+          g_strdup(json_object_get_string_member(data, "bearerId"));
+  res->data.end_stream.bearer_name =
+          g_strdup(json_object_get_string_member(data, "bearerName"));
+  res->data.end_stream.system_id =
+          g_strdup(json_object_get_string_member(data, "systemId"));
+  res->data.end_stream.session_id =
+          g_strdup(json_object_get_string_member(data, "sessionId"));
+  res->data.end_stream.recording_id =
+          g_strdup(json_object_get_string_member(data, "recordingId"));
+
+out:
+  g_clear_object(&parser);
+
+  return res;
+}
+
+static message_t *
 parse_peer_connected(const gchar *msg, GError **err)
 {
   JsonParser *parser = NULL;
@@ -354,6 +417,47 @@ out:
 }
 
 static message_t *
+parse_peer_disconnected(const gchar *msg, GError **err)
+{
+  JsonParser *parser = NULL;
+  JsonNode *root;
+  JsonObject *obj;
+  message_t *res = NULL;
+
+  parser = json_parser_new();
+
+  if (!json_parser_load_from_data(parser, msg, strlen(msg), err)) {
+    return NULL;
+  }
+
+  root = json_parser_get_root(parser);
+  if (root == NULL) {
+    g_warning("Failed to get a root node from string %s", msg);
+    goto out;
+  }
+
+  if (!JSON_NODE_HOLDS_OBJECT(root)) {
+    g_warning("Bad JSON message received");
+    goto out;
+  }
+
+  obj = json_node_get_object(root);
+
+  res = g_malloc0(sizeof(*res));
+  res->type = MSG_TYPE_PEER_DISCONNECTED;
+
+  res->data.disconnected.source =
+          g_strdup(json_object_get_string_member(obj, "source"));
+  res->data.disconnected.subject =
+          g_strdup(json_object_get_string_member(obj, "subject"));
+
+out:
+  g_clear_object(&parser);
+
+  return res;
+}
+
+static message_t *
 parse_events_notify_msg(JsonObject *obj, GError **err)
 {
   JsonObject *notification;
@@ -378,6 +482,10 @@ parse_events_notify_msg(JsonObject *obj, GError **err)
       return parse_peer_connected(event, err);
     } else if (g_strcmp0(event_type, TYPE_STREAM_STARTED) == 0) {
       return parse_stream_started(event, err);
+    } else if (g_strcmp0(event_type, TYPE_STREAM_STOPPED) == 0) {
+      return parse_stream_stopped(event, err);
+    } else if (g_strcmp0(event_type, TYPE_PEER_DISCONNECTED) == 0) {
+      return parse_peer_disconnected(event, err);
     }
   }
 
@@ -785,12 +893,18 @@ message_create_reply(message_t *msg, const gchar *token)
   JsonObject *data;
   gchar *reply;
 
+  if (msg == NULL) {
+    return NULL;
+  }
+
   switch (msg->type) {
   case MSG_TYPE_HELLO:
   case MSG_TYPE_RESPONSE:
   case MSG_TYPE_STREAM_STARTED:
   case MSG_TYPE_PEER_CONNECTED:
   case MSG_TYPE_INIT_SESSION:
+  case MSG_TYPE_STREAM_STOPPED:
+  case MSG_TYPE_PEER_DISCONNECTED:
     return NULL;
   default:
     g_message("composing reply message");
@@ -798,6 +912,10 @@ message_create_reply(message_t *msg, const gchar *token)
 
   root = json_object_new();
   data = json_object_new();
+  if (root == NULL || data == NULL) {
+    g_warning("Could not allocate JSON structs!");
+    return NULL;
+  }
 
   json_object_set_string_member(root, "targetId", msg->target);
   json_object_set_string_member(root, "correlationId", msg->correlation_id);
@@ -846,6 +964,7 @@ message_free(message_t *msg)
   if (msg == NULL) {
     return;
   }
+
   switch (msg->type) {
   case MSG_TYPE_RESPONSE:
   case MSG_TYPE_HELLO:
@@ -868,9 +987,26 @@ message_free(message_t *msg)
     g_free(msg->data.new_stream.recording_id);
     break;
 
+  case MSG_TYPE_STREAM_STOPPED:
+    g_free(msg->data.end_stream.source);
+    g_free(msg->data.end_stream.subject);
+    g_free(msg->data.end_stream.time);
+    g_free(msg->data.end_stream.trigger_type);
+    g_free(msg->data.end_stream.bearer_id);
+    g_free(msg->data.end_stream.bearer_name);
+    g_free(msg->data.end_stream.system_id);
+    g_free(msg->data.end_stream.session_id);
+    g_free(msg->data.end_stream.recording_id);
+    break;
+
   case MSG_TYPE_PEER_CONNECTED:
     g_free(msg->data.connected.source);
     g_free(msg->data.connected.subject);
+    break;
+
+  case MSG_TYPE_PEER_DISCONNECTED:
+    g_free(msg->data.disconnected.source);
+    g_free(msg->data.disconnected.subject);
     break;
 
   case MSG_TYPE_INIT_SESSION:

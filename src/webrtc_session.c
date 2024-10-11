@@ -1,5 +1,6 @@
 #include <glib.h>
 #include <glib-object.h>
+#include <gio/gio.h>
 #include <gst/gst.h>
 #include <gst/pbutils/missing-plugins.h>
 
@@ -9,6 +10,7 @@
 #include "webrtc_session.h"
 
 #define RTP_PAYLOAD_TYPE "96"
+#define STATS_INTERVAL   5
 
 struct signal {
   gulong id;
@@ -36,6 +38,11 @@ struct _WebrtcSession {
   GstElement *pipeline;
   GPtrArray *signals;
   GstPad *sinkpad;
+
+  GFileOutputStream *stats_out;
+  guint stats_timer;
+  gchar *stats_str;
+  GCancellable *cancel;
 };
 
 G_DEFINE_TYPE(WebrtcSession, webrtc_session, G_TYPE_OBJECT);
@@ -161,6 +168,7 @@ on_answer_created(GstPromise *promise, gpointer user_data)
                                 self->id,
                                 sdp_text);
   g_free(sdp_text);
+  gst_promise_unref(promise);
 
   /* TODO: Cleanup? Add ICE candidates here? */
 }
@@ -352,6 +360,186 @@ add_all_elements(WebrtcSession *self, GPtrArray *elems)
 }
 
 static void
+stats_flush_done(GObject *source_object,
+                 GAsyncResult *res,
+                 G_GNUC_UNUSED gpointer data)
+{
+  GError *err = NULL;
+
+  if (!g_output_stream_flush_finish(G_OUTPUT_STREAM(source_object),
+                                    res,
+                                    &err)) {
+    g_warning("Failed to flush stats file: %s", err->message);
+    g_clear_error(&err);
+  }
+}
+
+static void
+stats_write_done(GObject *source_object, GAsyncResult *res, gpointer data)
+{
+  WebrtcSession *self = WEBRTC_SESSION(data);
+  GError *err = NULL;
+
+  g_assert(self);
+  g_assert(source_object);
+
+  if (!g_output_stream_write_all_finish(G_OUTPUT_STREAM(source_object),
+                                        res,
+                                        NULL,
+                                        &err)) {
+    g_warning("Failed to write stats file: %s", err->message);
+    g_clear_error(&err);
+  }
+
+  g_free(self->stats_str);
+  g_object_unref(self);
+
+  g_output_stream_flush_async(G_OUTPUT_STREAM(source_object),
+                              G_PRIORITY_DEFAULT,
+                              self->cancel,
+                              stats_flush_done,
+                              NULL);
+}
+
+static gboolean
+find_rtp_inputs(G_GNUC_UNUSED GQuark field_id,
+                const GValue *value,
+                gpointer user_data)
+{
+  guint64 *res = (guint64 *) user_data;
+  GstWebRTCStatsType type;
+  guint64 tmp;
+  const GstStructure *gst_struct = NULL;
+
+  g_assert(user_data);
+
+  if (!GST_VALUE_HOLDS_STRUCTURE(value)) {
+    return TRUE;
+  }
+
+  gst_struct = gst_value_get_structure(value);
+
+  if (!gst_structure_get(gst_struct,
+                         "type",
+                         GST_TYPE_WEBRTC_STATS_TYPE,
+                         &type,
+                         NULL)) {
+    return TRUE;
+  }
+
+  if (type != GST_WEBRTC_STATS_INBOUND_RTP) {
+    return TRUE;
+  }
+
+  gst_structure_get_uint64(gst_struct, "bytes-received", &tmp);
+  *res = (*res) + tmp;
+
+  return TRUE;
+}
+
+static void
+on_stats_cb(GstPromise *promise, gpointer user_data)
+{
+  WebrtcSession *self = WEBRTC_SESSION(user_data);
+  GstPromiseResult res;
+  const GstStructure *reply;
+
+  guint64 bytes_received = 0;
+  gint64 ts;
+
+  g_assert(promise);
+  g_assert(self);
+
+  res = gst_promise_wait(promise);
+  if (res != GST_PROMISE_RESULT_REPLIED) {
+    switch (res) {
+    case GST_PROMISE_RESULT_INTERRUPTED:
+      g_warning("Session %s: Stats request was interrupted", self->id);
+      break;
+    case GST_PROMISE_RESULT_EXPIRED:
+      g_warning("Session %s: Stats request expired", self->id);
+      break;
+    default:
+      g_error("Session %s: Unknown error while receiving stats answer",
+              self->id);
+      break;
+    }
+
+    gst_promise_unref(promise);
+    return;
+  }
+
+  reply = gst_promise_get_reply(promise);
+  if (reply == NULL) {
+    return;
+  }
+
+  g_message("GETTING STATS");
+
+  gst_structure_foreach(reply, find_rtp_inputs, &bytes_received);
+
+  gst_promise_unref(promise);
+
+  if (bytes_received == 0) {
+    return;
+  }
+
+  ts = g_get_real_time();
+
+  self->stats_str =
+          g_strdup_printf("%" G_GINT64_FORMAT "\t%" G_GUINT64_FORMAT "\n",
+                          ts,
+                          bytes_received);
+
+  g_output_stream_write_all_async(G_OUTPUT_STREAM(self->stats_out),
+                                  self->stats_str,
+                                  strlen(self->stats_str),
+                                  G_PRIORITY_DEFAULT,
+                                  self->cancel,
+                                  stats_write_done,
+                                  g_object_ref(self));
+}
+
+static gboolean
+request_stats(WebrtcSession *self)
+{
+  GstPromise *promise;
+
+  g_assert(self);
+
+  if (self->stats_out == NULL) {
+    return FALSE;
+  }
+
+  promise = gst_promise_new_with_change_func(on_stats_cb,
+                                             g_object_ref(G_OBJECT(self)),
+                                             g_object_unref);
+  g_signal_emit_by_name(self->webrtc_bin, "get-stats", NULL, promise);
+
+  return TRUE;
+}
+
+static void
+stats_file_created_cb(GObject *source_object, GAsyncResult *res, gpointer data)
+{
+  WebrtcSession *self = WEBRTC_SESSION(data);
+  GError *err = NULL;
+
+  self->stats_out = g_file_create_finish(G_FILE(source_object), res, &err);
+
+  if (self->stats_out == NULL) {
+    g_warning("Failed to create stats file: %s", err->message);
+    g_clear_error(&err);
+  }
+
+  self->stats_timer = g_timeout_add_seconds(STATS_INTERVAL,
+                                            G_SOURCE_FUNC(request_stats),
+                                            data);
+
+  g_object_unref(self);
+}
+
+static void
 print_caps(const GstCaps *caps)
 {
   GstStructure *s;
@@ -366,62 +554,6 @@ print_caps(const GstCaps *caps)
     g_message("Caps %s: %s", name, caps_str);
     g_free(caps_str);
   }
-}
-
-static void
-on_pad_decodebin_added(G_GNUC_UNUSED GstElement *element,
-                       GstPad *pad,
-                       gpointer user_data)
-{
-  GstPad *qpad;
-  GstPadLinkReturn ret;
-  GstCaps *caps;
-  GPtrArray *elems = NULL;
-  const gchar *name;
-  WebrtcSession *self = WEBRTC_SESSION(user_data);
-  const gchar *add_name = NULL;
-
-  if (GST_PAD_DIRECTION(pad) != GST_PAD_SRC) {
-    g_message("Pad not a source pad, returning");
-  }
-
-  if (!gst_pad_has_current_caps(pad)) {
-    g_warning("Pad '%s' has no caps, can't do anything, ignoring\n",
-              GST_PAD_NAME(pad));
-    return;
-  }
-
-  g_message("Linking decode bin with sinks");
-
-  caps = gst_pad_get_current_caps(pad);
-  name = gst_structure_get_name(gst_caps_get_structure(caps, 0));
-
-  print_caps(caps);
-
-  if (g_str_has_prefix(name, "video")) {
-    if (self->use_video) {
-      add_name = "video";
-      elems = self->video;
-    }
-  } else if (g_str_has_prefix(name, "audio")) {
-    if (self->use_audio) {
-      add_name = "audio";
-      elems = self->audio;
-    }
-  }
-
-  if (elems != NULL) {
-    g_message("Adding %s pad", add_name);
-    add_all_elements(self, elems);
-    qpad = gst_element_get_static_pad(GST_ELEMENT(elems->pdata[0]), "sink");
-
-    ret = gst_pad_link(pad, qpad);
-    g_assert_cmphex(ret, ==, GST_PAD_LINK_OK);
-  }
-
-  g_object_set(self->webrtc_bin, "latency", 200, NULL);
-  gst_bin_recalculate_latency(GST_BIN(self->pipeline));
-  g_clear_pointer(&caps, gst_caps_unref);
 }
 
 static void
@@ -487,12 +619,8 @@ on_data_channel(G_GNUC_UNUSED GstElement *webrtc,
 }
 
 static void
-new_payload_type_callback(G_GNUC_UNUSED GstElement *demux,
-                          guint pt,
-                          GstPad *pad,
-                          gpointer user_data)
+setup_muxed_pipeline(guint pt, GstPad *pad, WebrtcSession *self)
 {
-  WebrtcSession *self = WEBRTC_SESSION(user_data);
   GstPad *sinkpad;
   GstPadLinkReturn ret;
   GPtrArray *elems = NULL;
@@ -507,10 +635,8 @@ new_payload_type_callback(G_GNUC_UNUSED GstElement *demux,
   const gchar *sink_name;
   const gchar *other_sink_name;
 
-  g_message("New payload type: %u", pt);
-
   elems = self->mux;
-  if (!self->mux_added && self->use_mux) {
+  if (!self->mux_added) {
     g_message("Adding all MUX elements");
     add_all_elements(self, elems);
     self->mux_added = TRUE;
@@ -534,6 +660,9 @@ new_payload_type_callback(G_GNUC_UNUSED GstElement *demux,
     parse = gst_element_factory_make("opusparse", NULL);
     sink_name = audio;
     other_sink_name = video;
+  } else {
+    g_warning("Unknown content id: %d", pt);
+    goto out;
   }
 
   gst_bin_add(GST_BIN(self->pipeline), rtpdepay);
@@ -577,7 +706,109 @@ new_payload_type_callback(G_GNUC_UNUSED GstElement *demux,
   gst_object_unref(srcpad);
   gst_object_unref(sinkpad);
 
+  /* Fall through */
+out:
   g_clear_pointer(&caps, gst_caps_unref);
+}
+
+static void
+setup_pipeline(guint pt, GstPad *pad, WebrtcSession *self)
+{
+  GstPad *sinkpad;
+  GstPadLinkReturn ret;
+  GPtrArray *elems = NULL;
+  GstElement *rtpdepay;
+  GstElement *decode;
+  GstElement *parse;
+
+  switch (pt) {
+  case 96: /* h264 */
+    g_message("Adding video pad link");
+
+    if (!self->use_video) {
+      goto out;
+    }
+    rtpdepay = gst_element_factory_make("rtph264depay", NULL);
+    parse = gst_element_factory_make("h264parse", NULL);
+    decode = gst_element_factory_make("avdec_h264", NULL);
+    elems = self->video;
+    break;
+
+  case 97: /* opus */
+    g_message("Adding audio (opus) pad link");
+
+    if (!self->use_audio) {
+      goto out;
+    }
+
+    rtpdepay = gst_element_factory_make("rtpopusdepay", NULL);
+    parse = gst_element_factory_make("opusparse", NULL);
+    decode = gst_element_factory_make("opusdec", NULL);
+    elems = self->audio;
+    break;
+
+  case 127:
+    g_message("Adding audio (aac) pad link");
+
+    if (!self->use_audio) {
+      goto out;
+    }
+
+    rtpdepay = gst_element_factory_make("rtpmp4gdepay", NULL);
+    parse = gst_element_factory_make("aacparse", NULL);
+    decode = gst_element_factory_make("avdec_aac", NULL);
+    elems = self->audio;
+    break;
+
+  default:
+    g_warning("Unknown content id: %d", pt);
+    goto out;
+  }
+
+  gst_bin_add(GST_BIN(self->pipeline), rtpdepay);
+  gst_bin_add(GST_BIN(self->pipeline), parse);
+  gst_bin_add(GST_BIN(self->pipeline), decode);
+
+  gst_element_sync_state_with_parent(rtpdepay);
+  gst_element_sync_state_with_parent(parse);
+  gst_element_sync_state_with_parent(decode);
+
+  add_all_elements(self, elems);
+
+  /* From rtpidentifier to rtpdepay */
+  sinkpad = gst_element_get_static_pad(rtpdepay, "sink");
+  ret = gst_pad_link(pad, sinkpad);
+  g_assert_cmphex(ret, ==, GST_PAD_LINK_OK);
+  gst_object_unref(sinkpad);
+
+  /* Rest och the chain */
+  if (!gst_element_link_many(rtpdepay,
+                             parse,
+                             decode,
+                             GST_ELEMENT(elems->pdata[0]),
+                             NULL)) {
+    g_warning("Could not link parser");
+  }
+
+  /* Fall through */
+out:
+}
+
+static void
+new_payload_type_callback(G_GNUC_UNUSED GstElement *demux,
+                          guint pt,
+                          GstPad *pad,
+                          gpointer user_data)
+{
+  WebrtcSession *self = WEBRTC_SESSION(user_data);
+
+  g_message("New payload type: %u", pt);
+
+  if (self->use_mux) {
+    setup_muxed_pipeline(pt, pad, self);
+  }
+
+  setup_pipeline(pt, pad, self);
 }
 
 static void
@@ -591,26 +822,14 @@ on_pad_added(G_GNUC_UNUSED GstElement *element, GstPad *pad, gpointer user_data)
     g_message("Pad not a source pad, returning");
   }
 
-  if (self->use_mux) {
-    g_message("Linking rtpptdemux bin");
-    decodebin = gst_element_factory_make("rtpptdemux", NULL);
+  g_message("Linking rtpptdemux bin");
+  decodebin = gst_element_factory_make("rtpptdemux", NULL);
 
-    connect(self->signals,
-            G_OBJECT(decodebin),
-            "new-payload-type",
-            G_CALLBACK(new_payload_type_callback),
-            self);
-
-  } else {
-    g_message("Linking decode bin");
-
-    decodebin = gst_element_factory_make("decodebin", NULL);
-    connect(self->signals,
-            G_OBJECT(decodebin),
-            "pad-added",
-            G_CALLBACK(on_pad_decodebin_added),
-            self);
-  }
+  connect(self->signals,
+          G_OBJECT(decodebin),
+          "new-payload-type",
+          G_CALLBACK(new_payload_type_callback),
+          self);
 
   gst_bin_add(GST_BIN(self->pipeline), decodebin);
   gst_element_sync_state_with_parent(decodebin);
@@ -626,6 +845,9 @@ webrtc_session_dispose(GObject *obj)
   WebrtcSession *self = WEBRTC_SESSION(obj);
 
   g_assert(self);
+
+  g_clear_handle_id(&self->stats_timer, g_source_remove);
+  g_clear_object(&self->stats_out);
 
   /* Do unrefs of objects and such. The object might be used after dispose,
    * and dispose might be called several times on the same object
@@ -766,8 +988,9 @@ webrtc_session_class_init(WebrtcSessionClass *klass)
 static void
 webrtc_session_init(WebrtcSession *self)
 {
-  /* initialize all public and private members to reasonable default values.
-   * They are all automatically initialized to 0 to begin with. */
+  g_assert(self);
+
+  self->cancel = g_cancellable_new();
 
   self->signals = g_ptr_array_new_full(0, g_free);
   self->audio = g_ptr_array_new_full(0, g_object_unref);
@@ -868,7 +1091,7 @@ set_transceiver(WebrtcSession *self)
 }
 
 void
-webrtc_session_start(WebrtcSession *self)
+webrtc_session_start(WebrtcSession *self, gboolean stat_file)
 {
   GstElement *pipeline;
   GstBus *bus;
@@ -877,6 +1100,22 @@ webrtc_session_start(WebrtcSession *self)
   // GstCaps *videoscalecaps;
 
   // guint bus_watch_id;
+
+  if (stat_file) {
+    GFile *stats_file;
+    gchar *path;
+
+    path = g_strdup_printf("%s-%s.tab", self->target, self->id);
+    stats_file = g_file_new_for_path(path);
+    g_file_append_to_async(stats_file,
+                           G_FILE_CREATE_NONE,
+                           G_PRIORITY_DEFAULT,
+                           self->cancel,
+                           stats_file_created_cb,
+                           g_object_ref(self));
+    g_free(path);
+    g_clear_object(&stats_file);
+  }
 
   /* Create gstreamer elements */
   pipeline = gst_pipeline_new("video-player");
@@ -993,6 +1232,7 @@ webrtc_session_stop(WebrtcSession *self)
     gst_element_set_state(self->pipeline, GST_STATE_NULL);
     g_clear_object(&self->pipeline);
   }
+  g_cancellable_cancel(self->cancel);
 }
 
 void
@@ -1056,4 +1296,12 @@ webrtc_session_set_gop(WebrtcSession *self, gint val)
   g_hash_table_insert(self->video_settings,
                       "keyframeInterval",
                       g_variant_new_int32(val));
+}
+
+const gchar *
+webrtc_session_get_id(WebrtcSession *self)
+{
+  g_return_val_if_fail(self != NULL, NULL);
+
+  return self->id;
 }

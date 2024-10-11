@@ -52,6 +52,8 @@ enum client_signals {
   SIG_NEW_STREAM,
   SIG_SERVER_LIST,
   SIG_NEW_CANDIDATE,
+  SIG_PEER_GONE,
+  SIG_STREAM_GONE,
   SIG_LAST
 };
 static guint client_signal_defs[SIG_LAST] = { 0 };
@@ -142,8 +144,22 @@ on_text_message(SoupWebsocketConnection *ws,
     info.system_id = msg->data.new_stream.system_id;
     info.time = msg->data.new_stream.time;
     info.trigger_type = msg->data.new_stream.trigger_type;
-    g_print("Emitting stream started!\n");
     g_signal_emit(self, client_signal_defs[SIG_NEW_STREAM], 0, &info);
+    break;
+  }
+
+  case MSG_TYPE_STREAM_STOPPED: {
+    struct stream_started info = { 0 };
+    info.bearer_id = msg->data.end_stream.bearer_id;
+    info.bearer_name = msg->data.end_stream.bearer_name;
+    info.recording_id = msg->data.end_stream.recording_id;
+    info.session_id = msg->data.end_stream.session_id;
+    info.source = msg->data.end_stream.source;
+    info.subject = msg->data.end_stream.subject;
+    info.system_id = msg->data.end_stream.system_id;
+    info.time = msg->data.end_stream.time;
+    info.trigger_type = msg->data.end_stream.trigger_type;
+    g_signal_emit(self, client_signal_defs[SIG_STREAM_GONE], 0, &info);
     break;
   }
 
@@ -163,6 +179,14 @@ on_text_message(SoupWebsocketConnection *ws,
                   msg->session_id,
                   msg->data.init_session.stun_servers,
                   msg->data.init_session.turn_servers);
+    break;
+
+  case MSG_TYPE_PEER_DISCONNECTED:
+    g_signal_emit(self,
+                  client_signal_defs[SIG_PEER_GONE],
+                  0,
+                  msg->data.disconnected.subject,
+                  msg->data.disconnected.subject);
     break;
   }
 
@@ -747,10 +771,37 @@ webrtc_client_class_init(WebrtcClientClass *klass)
                         G_N_ELEMENTS(new_peer_types) /* n_params */,
                         new_peer_types /* param_types, or set to NULL */
           );
+  client_signal_defs[SIG_PEER_GONE] =
+          g_signal_newv("remove-peer",
+                        G_TYPE_FROM_CLASS(object_class),
+                        G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE |
+                                G_SIGNAL_NO_HOOKS,
+                        NULL /* closure */,
+                        NULL /* accumulator */,
+                        NULL /* accumulator data */,
+                        NULL /* C marshaller */,
+                        G_TYPE_NONE /* return_type */,
+                        G_N_ELEMENTS(new_peer_types) /* n_params */,
+                        new_peer_types /* param_types, or set to NULL */
+          );
 
   GType new_stream_types[] = { G_TYPE_POINTER };
   client_signal_defs[SIG_NEW_STREAM] =
           g_signal_newv("new-stream",
+                        G_TYPE_FROM_CLASS(object_class),
+                        G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE |
+                                G_SIGNAL_NO_HOOKS,
+                        NULL /* closure */,
+                        NULL /* accumulator */,
+                        NULL /* accumulator data */,
+                        NULL /* C marshaller */,
+                        G_TYPE_NONE /* return_type */,
+                        G_N_ELEMENTS(new_stream_types) /* n_params */,
+                        new_stream_types /* param_types, or set to NULL */
+          );
+
+  client_signal_defs[SIG_STREAM_GONE] =
+          g_signal_newv("remove-stream",
                         G_TYPE_FROM_CLASS(object_class),
                         G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE |
                                 G_SIGNAL_NO_HOOKS,

@@ -97,7 +97,7 @@ on_new_stream(G_GNUC_UNUSED GObject *source,
     webrtc_session_set_gop(sess, conf_int);
   }
 
-  webrtc_session_start(sess);
+  webrtc_session_start(sess, FALSE);
 
   g_hash_table_insert(ctx->sessions, g_strdup(session_id), sess);
 }
@@ -123,6 +123,26 @@ on_close_stream(G_GNUC_UNUSED GObject *source,
   webrtc_session_stop(sess);
 
   g_hash_table_remove(ctx->sessions, session_id);
+}
+
+static void
+on_remove_stream(G_GNUC_UNUSED GObject *source,
+                 struct stream_started *info,
+                 struct app_ctx *ctx)
+{
+  WebrtcSession *sess;
+
+  sess = g_hash_table_lookup(ctx->sessions, info->session_id);
+
+  if (sess == NULL) {
+    return;
+  }
+
+  g_message("Stopping session id: %s", info->session_id);
+
+  webrtc_session_stop(sess);
+  g_hash_table_remove(ctx->sessions, info->session_id);
+  webrtc_gui_remove_paintable(ctx->gui, info->session_id);
 }
 
 int
@@ -152,6 +172,7 @@ main(int argc, char **argv)
 
   g_signal_connect(ctx.gui, "new-stream", G_CALLBACK(on_new_stream), &ctx);
   g_signal_connect(ctx.gui, "close-stream", G_CALLBACK(on_close_stream), &ctx);
+  g_signal_connect(ctx.c, "remove-stream", G_CALLBACK(on_remove_stream), &ctx);
 
   ctx.app = get_application();
 

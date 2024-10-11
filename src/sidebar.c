@@ -12,6 +12,10 @@ static const gchar *boolean_options_list[] = { USE_DEFAULT,
                                                "enabled",
                                                NULL };
 
+#ifndef G_APPLICATION_DEFAULT_FLAGS
+#define G_APPLICATION_DEFAULT_FLAGS 0
+#endif
+
 #if ADW_MINOR_VERSION >= 4 && ADW_MAJOR_VERSION >= 1
 GtkWidget *
 get_framed_content(GtkWidget *menu, GtkWidget *content)
@@ -271,8 +275,8 @@ add_pref_number(AdwPreferencesGroup *group,
                 gint max,
                 gpointer data)
 {
+#if ADW_MINOR_VERSION >= 2 && ADW_MAJOR_VERSION >= 1
   GtkWidget *input;
-
   input = adw_entry_row_new();
 
   adw_entry_row_set_input_purpose(ADW_ENTRY_ROW(input),
@@ -287,6 +291,27 @@ add_pref_number(AdwPreferencesGroup *group,
   g_signal_connect(input, "changed", G_CALLBACK(numeric_input_changed), data);
 
   adw_preferences_group_add(group, input);
+#else
+  GtkWidget *row;
+  GtkWidget *box;
+  GtkWidget *label;
+  GtkWidget *input;
+
+  row = gtk_list_box_row_new();
+  input = gtk_entry_new();
+  label = gtk_label_new(title);
+  box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+
+  gtk_box_append(GTK_BOX(box), label);
+  gtk_box_append(GTK_BOX(box), input);
+  gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+
+  g_object_set_data(G_OBJECT(input), "pref_name", (gchar *) pref_name);
+  g_object_set_data(G_OBJECT(input), "max_input", GINT_TO_POINTER(max));
+
+  g_signal_connect(input, "changed", G_CALLBACK(numeric_input_changed), data);
+  adw_preferences_group_add(group, row);
+#endif
 }
 
 static void

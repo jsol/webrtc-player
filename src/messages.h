@@ -7,7 +7,9 @@ enum message_type {
   MSG_TYPE_PEER_CONNECTED,
   MSG_TYPE_INIT_SESSION,
   MSG_TYPE_ICE_CANDIDATE,
-  MSG_TYPE_RESPONSE
+  MSG_TYPE_RESPONSE,
+  MSG_TYPE_PEER_DISCONNECTED,
+  MSG_TYPE_STREAM_STOPPED
 };
 
 typedef struct message {
@@ -30,6 +32,11 @@ typedef struct message {
     struct {
       gchar *source;
       gchar *subject;
+    } disconnected;
+
+    struct {
+      gchar *source;
+      gchar *subject;
       gchar *time;
       gchar *trigger_type;
       gchar *bearer_id;
@@ -38,6 +45,18 @@ typedef struct message {
       gchar *session_id;
       gchar *recording_id;
     } new_stream;
+
+    struct {
+      gchar *source;
+      gchar *subject;
+      gchar *time;
+      gchar *trigger_type;
+      gchar *bearer_id;
+      gchar *bearer_name;
+      gchar *system_id;
+      gchar *session_id;
+      gchar *recording_id;
+    } end_stream;
 
     struct {
       GStrv turn_servers;
