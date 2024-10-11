@@ -2,6 +2,7 @@
 
 enum message_type {
   MSG_TYPE_HELLO = 0,
+  MSG_TYPE_AUTH,
   MSG_TYPE_SDP_OFFER,
   MSG_TYPE_STREAM_STARTED,
   MSG_TYPE_PEER_CONNECTED,
@@ -23,6 +24,11 @@ typedef struct message {
     struct {
       gchar *sdp;
     } sdp_offer;
+
+    struct {
+      gchar *token;
+      GDateTime *expires;
+    } auth;
 
     struct {
       gchar *source;

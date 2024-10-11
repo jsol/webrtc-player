@@ -147,6 +147,34 @@ test_parse_hello(void)
 }
 
 void
+test_auth_hello(void)
+{
+  GBytes *json;
+  message_t *msg;
+  gchar *exp_str;
+
+  json = load_json_file("auth");
+  g_assert_true(json != NULL);
+
+  msg = message_parse(json, NULL);
+
+  g_assert_true(msg != NULL);
+  g_assert_cmpuint(MSG_TYPE_AUTH, ==, msg->type);
+
+  g_assert_cmpstr(
+          "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJleHAiOjE3Mjg2NDE2NTEsIm5iZiI6MTcyODY0MTM0NiwiaWF0IjoxNzI4NjQxMzUxfQ._ozRABXNxaeXTaQcAnp6Gq1QRc9AftTjnAWink0DNgA",
+          ==,
+          msg->data.auth.token);
+
+  exp_str = g_date_time_format_iso8601(msg->data.auth.expires);
+  g_assert_cmpstr("2024-10-11T10:14:11.331565Z", ==, exp_str);
+  g_free(exp_str);
+
+  message_free(msg);
+  g_bytes_unref(json);
+}
+
+void
 test_parse_init_session(void)
 {
   GBytes *json;
@@ -186,7 +214,6 @@ test_parse_init_session(void)
   g_bytes_unref(json);
 }
 
-
 void
 test_parse_response(void)
 {
@@ -225,6 +252,7 @@ main(int argc, char *argv[])
   g_test_add_func("/message/parse/event/stream_started",
                   test_parse_stream_started);
   g_test_add_func("/message/parse/client/hello", test_parse_hello);
+  g_test_add_func("/message/parse/init/auth", test_auth_hello);
   g_test_add_func("/message/parse/signaling/init_session",
                   test_parse_init_session);
   g_test_add_func("/message/parse/signaling/response", test_parse_response);

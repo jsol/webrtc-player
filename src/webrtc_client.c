@@ -12,9 +12,10 @@
 #define URL_PATH_TARGETS "local/BodyWornLiveStandalone/status.cgi"
 #define URL_PATH_STREAM  "vapix/ws-data-stream?sources=events"
 
-#define POST_DATA_KEY     "post-data"
-#define SEND_FUNC_KEY     "send-func"
-#define INCOMING_FUNC_KEY "inc-func"
+#define POST_DATA_KEY       "post-data"
+#define SEND_FUNC_KEY       "send-func"
+#define INCOMING_FUNC_KEY   "inc-func"
+#define MIN_TIMEOUT_REFRESH 5 * 60 /* s */
 
 #define AUTH_REQ_BODY                                                          \
   "{\"apiVersion\":\"1.0\","                                                   \
@@ -42,6 +43,7 @@ struct _WebrtcClient {
   gchar *user;
   gchar *pass;
   gchar *token;
+  guint refresh_timeout;
 };
 
 G_DEFINE_TYPE(WebrtcClient, webrtc_client, G_TYPE_OBJECT)
@@ -83,6 +85,8 @@ static gboolean authenticate_callback(G_GNUC_UNUSED SoupMessage *msg,
 
 static void restarted_callback(SoupMessage *msg, gpointer user_data);
 
+static void get_auth(WebrtcClient *self);
+
 static void
 on_text_message(SoupWebsocketConnection *ws,
                 G_GNUC_UNUSED SoupWebsocketDataType datatype,
@@ -104,7 +108,11 @@ on_text_message(SoupWebsocketConnection *ws,
   }
 
   switch (msg->type) {
+  case MSG_TYPE_AUTH:
+    /*ignore */
+    break;
   case MSG_TYPE_RESPONSE:
+
     g_message("Response received");
     break;
   case MSG_TYPE_HELLO: {
@@ -517,17 +525,27 @@ get_online_streams(WebrtcClient *self)
                                    g_object_ref(self));
 }
 
+static gboolean
+refresh_auth(gpointer user_data)
+{
+  WebrtcClient *self = user_data;
+
+  g_message("Refreshing token");
+  get_auth(self);
+
+  return FALSE;
+}
+
 static void
 on_auth_callback(GObject *source, GAsyncResult *result, gpointer user_data)
 {
   WebrtcClient *self = user_data;
   GError *lerr = NULL;
-  GBytes *bytes;
-  JsonParser *parser = NULL;
-  JsonNode *root;
-  JsonObject *obj;
-  JsonObject *data;
-  gchar *uri;
+  GBytes *bytes = NULL;
+  message_t *msg = NULL;
+  GDateTime *now = NULL;
+  GTimeSpan diff;
+  gchar *uri = NULL;
 
   g_assert(self);
 
@@ -542,57 +560,49 @@ on_auth_callback(GObject *source, GAsyncResult *result, gpointer user_data)
     goto out;
   }
 
-  parser = json_parser_new();
+  msg = message_parse(bytes, &lerr);
 
-  if (!json_parser_load_from_data(parser,
-                                  g_bytes_get_data(bytes, NULL),
-                                  g_bytes_get_size(bytes),
-                                  &lerr)) {
-    gchar *msg;
-    msg = g_strndup(g_bytes_get_data(bytes, NULL), g_bytes_get_size(bytes));
-    g_warning("Could not parse incoming message %s: %s",
-              msg,
+  if (msg == NULL) {
+    g_warning("Failed to parse auth response: %s",
               lerr != NULL ? lerr->message : "No error message");
     g_clear_error(&lerr);
-    g_free(msg);
     goto out;
   }
 
-  root = json_parser_get_root(parser);
-  obj = json_node_get_object(root);
+  g_object_set(self, "token", msg->data.auth.token, NULL);
 
-  if (!json_object_has_member(obj, "data")) {
-    gchar *msg;
-    msg = g_strndup(g_bytes_get_data(bytes, NULL), g_bytes_get_size(bytes));
-
-    g_warning("Message does not contain type data: %s", msg);
-    g_free(msg);
-    goto out;
-  }
-
-  data = json_object_get_object_member(obj, "data");
-
-  g_object_set(self,
-               "token",
-               json_object_get_string_member(data, "token"),
-               NULL);
   g_message("Got auth token %s", self->token);
 
-  g_message("Expires at %s", json_object_get_string_member(data, "expiresAt"));
+  now = g_date_time_new_now_utc();
 
-  uri = g_strdup_printf("wss://%s/%s?authorization=%s",
-                        self->server,
-                        URL_PATH_WSS,
-                        self->token); /* TODO: Url-secure the token */
-  init_socket_connection(self, uri, client_connection_cb);
+  diff = g_date_time_difference(msg->data.auth.expires, now);
 
-  get_online_streams(self);
+  diff = diff / G_USEC_PER_SEC; /* turn into seconds */
+  diff -= 5;                    /* Add some margin */
+
+  diff = MAX(diff, MIN_TIMEOUT_REFRESH);
+
+  g_message("Refreshing auth token in %ld s", diff);
+
+  self->refresh_timeout = g_timeout_add_seconds(diff, refresh_auth, self);
+
+  if (self->client == NULL) {
+    uri = g_strdup_printf("wss://%s/%s?authorization=%s",
+                          self->server,
+                          URL_PATH_WSS,
+                          self->token); /* TODO: Url-secure the token */
+    init_socket_connection(self, uri, client_connection_cb);
+
+    get_online_streams(self);
+  }
 
   /* Fall through */
 out:
   /* parser owns all the JSON objects and nodes */
   g_free(uri);
-  g_clear_object(&parser);
+
+  g_clear_pointer(&now, g_date_time_unref);
+  g_clear_pointer(&msg, message_free);
   g_clear_pointer(&bytes, g_bytes_unref);
   g_object_unref(self);
 }
@@ -639,6 +649,8 @@ webrtc_client_dispose(GObject *obj)
   WebrtcClient *self = WEBRTC_CLIENT(obj);
 
   g_assert(self);
+
+  g_clear_handle_id(&self->refresh_timeout, g_source_remove);
 
   /* Do unrefs of objects and such. The object might be used after dispose,
    * and dispose might be called several times on the same object

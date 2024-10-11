@@ -493,6 +493,48 @@ parse_events_notify_msg(JsonObject *obj, GError **err)
 }
 
 static message_t *
+parse_auth_msg(JsonObject *obj, G_GNUC_UNUSED GError **err)
+{
+  message_t *res = NULL;
+  const gchar *token;
+  const gchar *expires;
+  GTimeZone *tz;
+
+  g_assert(obj);
+  g_message("Parsing AUTH");
+
+  token = json_object_get_string_member(obj, "token");
+  expires = json_object_get_string_member(obj, "expiresAt");
+  if (token == NULL || expires == NULL) {
+    /* TODO: Fix error */
+    g_message("Missing variable");
+    return NULL;
+  }
+
+  tz = g_time_zone_new_local();
+  res = g_malloc0(sizeof(*res));
+
+  g_message("Setting members");
+  res->type = MSG_TYPE_AUTH;
+  res->data.auth.token = g_strdup(token);
+  res->data.auth.expires = g_date_time_new_from_iso8601(expires, tz);
+
+  if (res->data.auth.expires == NULL) {
+    GDateTime *tmp;
+    g_warning("Expires could not be parsed");
+    tmp = g_date_time_new_now(tz);
+    res->data.auth.expires = g_date_time_add_minutes(tmp, 5);
+    g_date_time_unref(tmp);
+  }
+
+  g_time_zone_unref(tz);
+
+  g_message("Returning from AUTH");
+
+  return res;
+}
+
+static message_t *
 parse_hello_msg(JsonObject *obj)
 {
   message_t *res = NULL;
@@ -598,6 +640,8 @@ message_parse(GBytes *src, GError **err)
       res = parse_events_notify_msg(json_object_get_object_member(obj,
                                                                   "params"),
                                     err);
+    } else if (g_strcmp0(type, "getSignalingClientToken") == 0) {
+      res = parse_auth_msg(json_object_get_object_member(obj, "data"), err);
     }
     goto out;
   }
@@ -969,6 +1013,11 @@ message_free(message_t *msg)
   case MSG_TYPE_RESPONSE:
   case MSG_TYPE_HELLO:
     /* no data */
+    break;
+
+  case MSG_TYPE_AUTH:
+    g_free(msg->data.auth.token);
+    g_date_time_unref(msg->data.auth.expires);
     break;
 
   case MSG_TYPE_SDP_OFFER:
