@@ -6,6 +6,7 @@
 #include <gtk/gtk.h>
 
 #include "webrtc_client.h"
+#include "webrtc_settings.h"
 
 G_BEGIN_DECLS
 
@@ -19,7 +20,7 @@ G_DECLARE_FINAL_TYPE(WebrtcGui, webrtc_gui, WEBRTC, GUI, GObject)
 /*
  * Method definitions.
  */
-WebrtcGui *webrtc_gui_new(WebrtcClient *protocol);
+WebrtcGui *webrtc_gui_new(WebrtcClient *protocol, WebrtcSettings *settings);
 
 void webrtc_gui_add_paintable(WebrtcGui *self,
                               const gchar *id,
@@ -28,15 +29,5 @@ void webrtc_gui_add_paintable(WebrtcGui *self,
 void webrtc_gui_remove_paintable(WebrtcGui *self, const gchar *id);
 
 void webrtc_gui_activate(GtkApplication *app, G_GNUC_UNUSED gpointer user_data);
-
-gboolean webrtc_gui_conf_codec(WebrtcGui *self, gchar **val);
-gboolean webrtc_gui_conf_adaptive(WebrtcGui *self, gboolean *val);
-
-gboolean
-webrtc_gui_conf_compression(WebrtcGui *self, gint *val);
-gboolean
-webrtc_gui_conf_max_bitrate(WebrtcGui *self, gint *val);
-gboolean
-webrtc_gui_conf_gop(WebrtcGui *self, gint *val);
 
 G_END_DECLS

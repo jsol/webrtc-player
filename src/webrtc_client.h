@@ -3,6 +3,8 @@
 #include <glib.h>
 #include <glib-object.h>
 
+#include "webrtc_settings.h"
+
 G_BEGIN_DECLS
 
 /*
@@ -44,8 +46,7 @@ void webrtc_client_connect_async(WebrtcClient *self);
 
 gboolean webrtc_client_init_session(WebrtcClient *self,
                                     const gchar *target,
-                                    const GHashTable *video_settings,
-                                    const GHashTable *audio_settings,
+                                    WebrtcSettings *settings,
                                     const gchar *session_id);
 
 gboolean webrtc_client_send_sdp_answer(WebrtcClient *self,

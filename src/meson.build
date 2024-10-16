@@ -34,6 +34,7 @@ sources = ([
   'messages.c',
   'webrtc_client.c',
   'webrtc_session.c',
+  'webrtc_settings.c',
   'webrtc_gui.c',
   'sidebar.c',
 ])
@@ -42,6 +43,7 @@ sources_filewriter = ([
   'main_filewriter.c',
   'messages.c',
   'webrtc_client.c',
+  'webrtc_settings.c',
   'webrtc_session.c'
 ])
 

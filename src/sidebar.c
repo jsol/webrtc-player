@@ -4,13 +4,9 @@
 
 #include "sidebar.h"
 
-#define APP_ID "com.github.com.jsol.webrtc_player"
+#include "webrtc_settings.h"
 
-static const gchar *audio_codec_list[] = { USE_DEFAULT, "aac", "opus", NULL };
-static const gchar *boolean_options_list[] = { USE_DEFAULT,
-                                               "disabled",
-                                               "enabled",
-                                               NULL };
+#define APP_ID "com.github.jsol.webrtc_player"
 
 #ifndef G_APPLICATION_DEFAULT_FLAGS
 #define G_APPLICATION_DEFAULT_FLAGS 0
@@ -187,21 +183,27 @@ on_selected_change(GObject *self,
                    G_GNUC_UNUSED GParamSpec *pspec,
                    gpointer user_data)
 {
-  GObject *app = G_OBJECT(user_data);
+  WebrtcSettings *settings = WEBRTC_SETTINGS(user_data);
   const gchar *name;
-  GObject *sel;
+  GtkStringObject *sel;
+  const gchar *txt;
 
   name = g_object_get_data(self, "pref_name");
   sel = adw_combo_row_get_selected_item(ADW_COMBO_ROW(self));
 
-  g_object_set_data_full(app, name, g_object_ref(sel), g_object_unref);
+  txt = gtk_string_object_get_string(sel);
+
+  webrtc_settings_set_string(settings, GPOINTER_TO_INT(name), txt);
+
+  g_clear_object(&sel);
 }
 
 static void
 add_pref_dropdown(AdwPreferencesGroup *group,
                   GListModel *model,
                   const gchar *title,
-                  const gchar *pref_name,
+                  GQuark pref,
+                  guint selected,
                   gpointer data)
 {
   GtkWidget *combo;
@@ -209,8 +211,10 @@ add_pref_dropdown(AdwPreferencesGroup *group,
   combo = adw_combo_row_new();
   adw_combo_row_set_model(ADW_COMBO_ROW(combo), model);
 
+  adw_combo_row_set_selected(ADW_COMBO_ROW(combo), selected);
+
   adw_preferences_row_set_title(ADW_PREFERENCES_ROW(combo), title);
-  g_object_set_data(G_OBJECT(combo), "pref_name", (gchar *) pref_name);
+  g_object_set_data(G_OBJECT(combo), "pref_name", GINT_TO_POINTER(pref));
   g_signal_connect(combo,
                    "notify::selected",
                    G_CALLBACK(on_selected_change),
@@ -220,7 +224,7 @@ add_pref_dropdown(AdwPreferencesGroup *group,
 }
 
 static void
-numeric_input_changed(GtkEditable *input, GObject *app)
+numeric_input_changed(GtkEditable *input, WebrtcSettings *settings)
 {
   const gchar *txt;
   gint64 num;
@@ -234,7 +238,7 @@ numeric_input_changed(GtkEditable *input, GObject *app)
   g_print("CHANGED: %s\n", txt);
 
   if (strlen(txt) == 0) {
-    g_object_set_data(app, name, GINT_TO_POINTER(-1));
+    webrtc_settings_set_number(settings, GPOINTER_TO_INT(name), -1);
     return;
   }
 
@@ -259,7 +263,7 @@ numeric_input_changed(GtkEditable *input, GObject *app)
     return;
   }
 
-  g_object_set_data(app, name, GINT_TO_POINTER(num));
+  webrtc_settings_set_number(settings, GPOINTER_TO_INT(name), num);
 
   tmp = g_strdup_printf("%d", (gint) num);
   if (g_strcmp0(tmp, txt) != 0) {
@@ -271,12 +275,15 @@ numeric_input_changed(GtkEditable *input, GObject *app)
 static void
 add_pref_number(AdwPreferencesGroup *group,
                 const gchar *title,
-                const gchar *pref_name,
+                GQuark pref_name,
+                gint64 current,
                 gint max,
                 gpointer data)
 {
-#if ADW_MINOR_VERSION >= 2 && ADW_MAJOR_VERSION >= 1
+  gchar *tmp = NULL;
   GtkWidget *input;
+#if ADW_MINOR_VERSION >= 2 && ADW_MAJOR_VERSION >= 1
+
   input = adw_entry_row_new();
 
   adw_entry_row_set_input_purpose(ADW_ENTRY_ROW(input),
@@ -285,7 +292,7 @@ add_pref_number(AdwPreferencesGroup *group,
 
   adw_preferences_row_set_title(ADW_PREFERENCES_ROW(input), title);
 
-  g_object_set_data(G_OBJECT(input), "pref_name", (gchar *) pref_name);
+  g_object_set_data(G_OBJECT(input), "pref_name", GINT_TO_POINTER(pref_name));
   g_object_set_data(G_OBJECT(input), "max_input", GINT_TO_POINTER(max));
 
   g_signal_connect(input, "changed", G_CALLBACK(numeric_input_changed), data);
@@ -295,7 +302,6 @@ add_pref_number(AdwPreferencesGroup *group,
   GtkWidget *row;
   GtkWidget *box;
   GtkWidget *label;
-  GtkWidget *input;
 
   row = gtk_list_box_row_new();
   input = gtk_entry_new();
@@ -306,12 +312,16 @@ add_pref_number(AdwPreferencesGroup *group,
   gtk_box_append(GTK_BOX(box), input);
   gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
 
-  g_object_set_data(G_OBJECT(input), "pref_name", (gchar *) pref_name);
+  g_object_set_data(G_OBJECT(input), "pref_name", (GINT_TO_POINTER(pref_name));
   g_object_set_data(G_OBJECT(input), "max_input", GINT_TO_POINTER(max));
 
   g_signal_connect(input, "changed", G_CALLBACK(numeric_input_changed), data);
   adw_preferences_group_add(group, row);
 #endif
+
+  tmp = g_strdup_printf("%ld", current);
+  gtk_editable_set_text(GTK_EDITABLE(input), tmp);
+  g_free(tmp);
 }
 
 static void
@@ -319,12 +329,16 @@ pref_menu_cb(G_GNUC_UNUSED GSimpleAction *simple_action,
              G_GNUC_UNUSED GVariant *parameter,
              gpointer *data)
 {
+  WebrtcSettings *settings = (WebrtcSettings *) data;
   GtkWidget *pref_window;
   GtkWidget *pref_page;
   GtkWidget *audio_pref_group;
   GtkWidget *video_pref_group;
+  GtkWidget *webrtc_pref_group;
   GtkStringList *codec_options;
   GtkStringList *boolean_options;
+  const gchar *audio_codec_list[] = AUDIO_CODEC_LIST;
+  const gchar *boolean_options_list[] = BOOLEAN_LIST;
 
   boolean_options = gtk_string_list_new(boolean_options_list);
 
@@ -337,7 +351,9 @@ pref_menu_cb(G_GNUC_UNUSED GSimpleAction *simple_action,
   add_pref_dropdown(ADW_PREFERENCES_GROUP(audio_pref_group),
                     G_LIST_MODEL(codec_options),
                     "Codec",
-                    "codec",
+                    WEBRTC_SETTINGS_AUDIO_CODEC,
+                    webrtc_settings_selected(settings,
+                                             WEBRTC_SETTINGS_AUDIO_CODEC),
                     data);
 
   adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(audio_pref_group),
@@ -350,29 +366,47 @@ pref_menu_cb(G_GNUC_UNUSED GSimpleAction *simple_action,
   add_pref_dropdown(ADW_PREFERENCES_GROUP(video_pref_group),
                     G_LIST_MODEL(boolean_options),
                     "Adaptive Bitrate",
-                    "adaptive",
+                    WEBRTC_SETTINGS_VIDEO_ADAPTIVE,
+                    webrtc_settings_selected(settings,
+                                             WEBRTC_SETTINGS_VIDEO_ADAPTIVE),
                     data);
 
   add_pref_number(ADW_PREFERENCES_GROUP(video_pref_group),
                   "Max Bitrate (Kbps)",
-                  "maxBitrateInKbps",
+                  WEBRTC_SETTINGS_VIDEO_MAX_BITRATE,
+                  webrtc_settings_video_max_bitrate(settings),
                   20000000,
                   data);
 
   add_pref_number(ADW_PREFERENCES_GROUP(video_pref_group),
                   "Compression (0-100)",
-                  "compression",
+                  WEBRTC_SETTINGS_VIDEO_COMPRESSION,
+                  webrtc_settings_video_compression(settings),
                   100,
                   data);
 
   add_pref_number(ADW_PREFERENCES_GROUP(video_pref_group),
                   "Key frame interval (GOP)",
-                  "keyframeInterval",
+                  WEBRTC_SETTINGS_VIDEO_GOP,
+                  webrtc_settings_video_gop(settings),
                   600,
                   data);
 
   adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(video_pref_group),
                                   "Video settings");
+
+  webrtc_pref_group = adw_preferences_group_new();
+
+  add_pref_dropdown(ADW_PREFERENCES_GROUP(webrtc_pref_group),
+                    G_LIST_MODEL(boolean_options),
+                    "Force TURN relay",
+                    WEBRTC_SETTINGS_FORCE_TURN,
+                    webrtc_settings_selected(settings,
+                                             WEBRTC_SETTINGS_FORCE_TURN),
+                    data);
+
+  adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(webrtc_pref_group),
+                                  "WebRTC settings");
 
   /* Show preference page */
   pref_page = adw_preferences_page_new();
@@ -383,13 +417,18 @@ pref_menu_cb(G_GNUC_UNUSED GSimpleAction *simple_action,
   adw_preferences_page_add(ADW_PREFERENCES_PAGE(pref_page),
                            ADW_PREFERENCES_GROUP(video_pref_group));
 
+  adw_preferences_page_add(ADW_PREFERENCES_PAGE(pref_page),
+                           ADW_PREFERENCES_GROUP(webrtc_pref_group));
+
   adw_preferences_window_add(ADW_PREFERENCES_WINDOW(pref_window),
                              ADW_PREFERENCES_PAGE(pref_page));
   gtk_window_present(GTK_WINDOW(pref_window));
 }
 
 static void
-build_app_menu(GtkMenuButton *menu_button, GtkApplication *app)
+build_app_menu(GtkMenuButton *menu_button,
+               GtkApplication *app,
+               WebrtcSettings *settings)
 {
   GMenu *menubar = g_menu_new();
   GMenuItem *menu_item_menu;
@@ -401,13 +440,16 @@ build_app_menu(GtkMenuButton *menu_button, GtkApplication *app)
 
   act = g_simple_action_new("pref", NULL);
   g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(act));
-  g_signal_connect(act, "activate", G_CALLBACK(pref_menu_cb), app);
+  g_signal_connect(act, "activate", G_CALLBACK(pref_menu_cb), settings);
 
   gtk_menu_button_set_menu_model((menu_button), G_MENU_MODEL(menubar));
 }
 
 GtkWidget *
-get_window(const gchar *title_str, GtkApplication *app, GtkWidget *content)
+get_window(const gchar *title_str,
+           GtkApplication *app,
+           GtkWidget *content,
+           WebrtcSettings *settings)
 {
   GtkWidget *title;
   GtkWidget *pref_menu;
@@ -422,7 +464,7 @@ get_window(const gchar *title_str, GtkApplication *app, GtkWidget *content)
   pref_menu = gtk_menu_button_new();
   header = adw_header_bar_new();
 
-  build_app_menu(GTK_MENU_BUTTON(pref_menu), app);
+  build_app_menu(GTK_MENU_BUTTON(pref_menu), app, settings);
 
   gtk_menu_button_set_direction(GTK_MENU_BUTTON(pref_menu), GTK_ARROW_NONE);
   adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), title);

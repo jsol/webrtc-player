@@ -2,6 +2,7 @@
 
 #include <glib-object.h>
 #include <gtk/gtk.h>
+#include "webrtc_settings.h"
 
 G_BEGIN_DECLS
 
@@ -9,8 +10,10 @@ G_BEGIN_DECLS
 
 GtkWidget *get_framed_content(GtkWidget *menu, GtkWidget *content);
 
-GtkWidget *
-get_window(const gchar *title_str, GtkApplication *app, GtkWidget *content);
+GtkWidget *get_window(const gchar *title_str,
+                      GtkApplication *app,
+                      GtkWidget *content,
+                      WebrtcSettings *settings);
 
 GtkWidget *get_button(const gchar *title,
                       const gchar *subtitle,

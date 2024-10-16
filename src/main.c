@@ -6,6 +6,7 @@
 #include "webrtc_client.h"
 #include "webrtc_gui.h"
 #include "webrtc_session.h"
+#include "webrtc_settings.h"
 #include "sidebar.h"
 
 struct app_ctx {
@@ -13,6 +14,7 @@ struct app_ctx {
   WebrtcGui *gui;
   GtkApplication *app;
   GHashTable *sessions;
+  WebrtcSettings *settings;
 };
 static void
 new_peer(G_GNUC_UNUSED GObject *source,
@@ -56,46 +58,13 @@ on_new_stream(G_GNUC_UNUSED GObject *source,
   GstElement *video_sink;
   GstElement *audio_sink;
   WebrtcSession *sess;
-  gchar *conf_str = NULL;
-  gint conf_int;
-  gboolean conf_bool;
 
-  sess = webrtc_session_new(ctx->c, session_id, target);
+  sess = webrtc_session_new(ctx->c, ctx->settings, session_id, target);
   video_sink = new_video_sink(ctx, session_id);
   audio_sink = gst_element_factory_make("autoaudiosink", "audio-output");
 
   webrtc_session_add_element(sess, WEBRTC_SESSION_ELEM_VIDEO, video_sink);
   webrtc_session_add_element(sess, WEBRTC_SESSION_ELEM_AUDIO, audio_sink);
-
-  if (webrtc_gui_conf_adaptive(ctx->gui, &conf_bool)) {
-    g_message("Video adaptive bitrate %s", conf_bool ? "enabled" : "disabled");
-    webrtc_session_set_adaptive_bitrate(sess, conf_bool);
-  }
-
-  if (webrtc_gui_conf_codec(ctx->gui, &conf_str)) {
-    if (g_strcmp0(conf_str, "aac") == 0) {
-      g_message("Using audio codec AAC");
-      webrtc_session_set_audio_codec(sess, WEBRTC_SESSION_AUDIO_CODEC_AAC);
-    } else if (g_strcmp0(conf_str, "opus") == 0) {
-      g_message("Using audio codec OPUS");
-      webrtc_session_set_audio_codec(sess, WEBRTC_SESSION_AUDIO_CODEC_OPUS);
-    }
-  }
-
-  if (webrtc_gui_conf_compression(ctx->gui, &conf_int)) {
-    g_message("Video compression: %d%%", conf_int);
-    webrtc_session_set_compression(sess, conf_int);
-  }
-
-  if (webrtc_gui_conf_max_bitrate(ctx->gui, &conf_int)) {
-    g_message("Max bitrate: %d kbps", conf_int);
-    webrtc_session_set_max_bitrate(sess, conf_int);
-  }
-
-  if (webrtc_gui_conf_gop(ctx->gui, &conf_int)) {
-    g_message("Key fram interval: %d frames", conf_int);
-    webrtc_session_set_gop(sess, conf_int);
-  }
 
   webrtc_session_start(sess, FALSE);
 
@@ -149,10 +118,20 @@ int
 main(int argc, char **argv)
 {
   struct app_ctx ctx = { 0 };
+  gint code;
   gst_init(&argc, &argv);
 
   if (!webrtc_session_check_plugins()) {
     return 1;
+  }
+
+  ctx.settings = webrtc_settings_new();
+
+  webrtc_settings_bind(ctx.settings);
+
+  code = webrtc_settings_parse_opts(ctx.settings, argc, argv);
+  if (code >= 0) {
+    goto out;
   }
 
   ctx.sessions = g_hash_table_new_full(g_str_hash,
@@ -166,7 +145,7 @@ main(int argc, char **argv)
 
   g_signal_connect(ctx.c, "new-peer", G_CALLBACK(new_peer), NULL);
 
-  ctx.gui = webrtc_gui_new(ctx.c);
+  ctx.gui = webrtc_gui_new(ctx.c, ctx.settings);
 
   webrtc_client_connect_async(ctx.c);
 
@@ -181,4 +160,7 @@ main(int argc, char **argv)
                    G_CALLBACK(webrtc_gui_activate),
                    ctx.gui);
   g_application_run(G_APPLICATION(ctx.app), argc, argv);
+
+out:
+  return code;
 }

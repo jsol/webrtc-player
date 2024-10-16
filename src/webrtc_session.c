@@ -8,6 +8,7 @@
 #include <gst/webrtc/webrtc.h>
 
 #include "webrtc_session.h"
+#include "webrtc_settings.h"
 
 #define RTP_PAYLOAD_TYPE "96"
 #define STATS_INTERVAL   5
@@ -21,10 +22,9 @@ struct _WebrtcSession {
   GObject parent;
 
   WebrtcClient *protocol;
+  WebrtcSettings *settings;
   gchar *id;
   gchar *target;
-  GHashTable *audio_settings;
-  GHashTable *video_settings;
   GPtrArray *video;
   GPtrArray *audio;
   GPtrArray *mux;
@@ -49,6 +49,7 @@ G_DEFINE_TYPE(WebrtcSession, webrtc_session, G_TYPE_OBJECT);
 
 typedef enum {
   PROP_PROTOCOL = 1,
+  PROP_SETTINGS,
   PROP_ID,
   PROP_TARGET,
   N_PROPERTIES
@@ -890,6 +891,10 @@ get_property(GObject *object,
     g_value_set_object(value, self->protocol);
     break;
 
+  case PROP_SETTINGS:
+    g_value_set_object(value, self->settings);
+    break;
+
   case PROP_ID:
     g_value_set_string(value, self->id);
     break;
@@ -936,6 +941,12 @@ set_property(GObject *object,
             G_CALLBACK(on_new_server_list),
             self);
     break;
+
+  case PROP_SETTINGS:
+    g_clear_object(&self->settings);
+    self->settings = g_value_dup_object(value);
+    break;
+
   case PROP_ID:
     g_free(self->id);
     self->id = g_value_dup_string(value);
@@ -968,6 +979,13 @@ webrtc_session_class_init(WebrtcSessionClass *klass)
                               "Protocol",
                               "Placeholder description.",
                               WEBRTC_TYPE_CLIENT, /* default */
+                              G_PARAM_READWRITE);
+
+  obj_properties[PROP_SETTINGS] =
+          g_param_spec_object("settings",
+                              "Settings",
+                              "Placeholder description.",
+                              WEBRTC_TYPE_SETTINGS, /* default */
                               G_PARAM_READWRITE);
 
   obj_properties[PROP_ID] = g_param_spec_string("id",
@@ -1003,21 +1021,13 @@ webrtc_session_init(WebrtcSession *self)
   g_ptr_array_add(self->audio, gst_element_factory_make("queue", NULL));
   g_ptr_array_add(self->audio, gst_element_factory_make("audioconvert", NULL));
   g_ptr_array_add(self->audio, gst_element_factory_make("audioresample", NULL));
-
-  self->audio_settings =
-          g_hash_table_new_full(g_str_hash,
-                                g_str_equal,
-                                NULL,
-                                (GDestroyNotify) g_variant_unref);
-  self->video_settings =
-          g_hash_table_new_full(g_str_hash,
-                                g_str_equal,
-                                NULL,
-                                (GDestroyNotify) g_variant_unref);
 }
 
 WebrtcSession *
-webrtc_session_new(WebrtcClient *protocol, const gchar *id, const gchar *target)
+webrtc_session_new(WebrtcClient *protocol,
+                   WebrtcSettings *settings,
+                   const gchar *id,
+                   const gchar *target)
 {
   g_return_val_if_fail(protocol != NULL, NULL);
   g_return_val_if_fail(id != NULL, NULL);
@@ -1030,6 +1040,8 @@ webrtc_session_new(WebrtcClient *protocol, const gchar *id, const gchar *target)
                       id,
                       "target",
                       target,
+                      "settings",
+                      settings,
                       NULL);
 }
 
@@ -1095,6 +1107,8 @@ webrtc_session_start(WebrtcSession *self, gboolean stat_file)
 {
   GstElement *pipeline;
   GstBus *bus;
+  GstWebRTCICETransportPolicy transport_policy =
+          GST_WEBRTC_ICE_TRANSPORT_POLICY_ALL;
 
   // GstElement *audio_demuxer, *audio_decoder, *audio_conv, *audio_sink;
   // GstCaps *videoscalecaps;
@@ -1122,10 +1136,16 @@ webrtc_session_start(WebrtcSession *self, gboolean stat_file)
   self->pipeline = pipeline;
   self->webrtc_bin = gst_element_factory_make("webrtcbin", "video-source");
 
+  if (webrtc_settings_ice_force_turn(self->settings)) {
+    transport_policy = GST_WEBRTC_ICE_TRANSPORT_POLICY_RELAY;
+    g_message("Enforcing TURN relay");
+  }
+
   g_object_set(self->webrtc_bin,
                "bundle-policy",
                GST_WEBRTC_BUNDLE_POLICY_MAX_BUNDLE,
-
+               "ice-transport-policy",
+               transport_policy,
                NULL);
 
   // conv = gst_element_factory_make("videoconvert", "converter");
@@ -1183,8 +1203,7 @@ webrtc_session_start(WebrtcSession *self, gboolean stat_file)
 
   webrtc_client_init_session(self->protocol,
                              self->target,
-                             self->video_settings,
-                             self->audio_settings,
+                             self->settings,
                              self->id);
   gst_element_set_state(self->pipeline, GST_STATE_PLAYING);
 }
@@ -1233,69 +1252,6 @@ webrtc_session_stop(WebrtcSession *self)
     g_clear_object(&self->pipeline);
   }
   g_cancellable_cancel(self->cancel);
-}
-
-void
-webrtc_session_set_audio_codec(WebrtcSession *self,
-                               enum webrtc_session_audio_codec codec)
-{
-  const gchar *tmp;
-
-  g_return_if_fail(self != NULL);
-
-  switch (codec) {
-  case WEBRTC_SESSION_AUDIO_CODEC_AAC:
-    tmp = "aac";
-    break;
-  case WEBRTC_SESSION_AUDIO_CODEC_OPUS:
-    tmp = "opus";
-    break;
-  default:
-    g_warning("Invalid codec setting");
-    return;
-  }
-
-  g_hash_table_insert(self->audio_settings, "codec", g_variant_new_string(tmp));
-}
-
-void
-webrtc_session_set_adaptive_bitrate(WebrtcSession *self, gboolean enabled)
-{
-  g_return_if_fail(self != NULL);
-
-  g_hash_table_insert(self->video_settings,
-                      "adaptive",
-                      g_variant_new_boolean(enabled));
-}
-
-void
-webrtc_session_set_max_bitrate(WebrtcSession *self, gint val)
-{
-  g_return_if_fail(self != NULL);
-
-  g_hash_table_insert(self->video_settings,
-                      "maxBitrateInKbps",
-                      g_variant_new_int32(val));
-}
-
-void
-webrtc_session_set_compression(WebrtcSession *self, gint val)
-{
-  g_return_if_fail(self != NULL);
-
-  g_hash_table_insert(self->video_settings,
-                      "compression",
-                      g_variant_new_int32(val));
-}
-
-void
-webrtc_session_set_gop(WebrtcSession *self, gint val)
-{
-  g_return_if_fail(self != NULL);
-
-  g_hash_table_insert(self->video_settings,
-                      "keyframeInterval",
-                      g_variant_new_int32(val));
 }
 
 const gchar *

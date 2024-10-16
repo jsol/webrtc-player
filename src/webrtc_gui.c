@@ -6,6 +6,7 @@
 
 #include "webrtc_gui.h"
 #include "webrtc_client.h"
+#include "webrtc_settings.h"
 #include "sidebar.h"
 
 struct _WebrtcGui {
@@ -22,11 +23,16 @@ struct _WebrtcGui {
   GHashTable *videos;
   GObject *app;
   GHashTable *buttons;
+  WebrtcSettings *settings;
 };
 
 G_DEFINE_TYPE(WebrtcGui, webrtc_gui, G_TYPE_OBJECT)
 
-typedef enum { PROP_PROTOCOL = 1, N_PROPERTIES } WebrtcGuiProperty;
+typedef enum {
+  PROP_PROTOCOL = 1,
+  PROP_SETTINGS,
+  N_PROPERTIES
+} WebrtcGuiProperty;
 static GParamSpec *obj_properties[N_PROPERTIES] = {
   NULL,
 };
@@ -154,6 +160,10 @@ get_property(GObject *object,
     g_value_set_object(value, self->protocol);
     break;
 
+  case PROP_SETTINGS:
+    g_value_set_object(value, self->settings);
+    break;
+
   default:
     /* We don't have any other property... */
     G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
@@ -182,6 +192,11 @@ set_property(GObject *object,
                      G_CALLBACK(on_stream_end),
                      self);
     break;
+  case PROP_SETTINGS:
+    g_clear_object(&self->settings);
+    self->settings = g_value_dup_object(value);
+    break;
+
   default:
     /* We don't have any other property... */
     G_OBJECT_WARN_INVALID_PROPERTY_ID(object, property_id, pspec);
@@ -235,6 +250,13 @@ webrtc_gui_class_init(WebrtcGuiClass *klass)
                               WEBRTC_TYPE_CLIENT, /* default */
                               G_PARAM_READWRITE);
 
+  obj_properties[PROP_SETTINGS] =
+          g_param_spec_object("settings",
+                              "Settings",
+                              "Placeholder description.",
+                              WEBRTC_TYPE_SETTINGS, /* default */
+                              G_PARAM_READWRITE);
+
   g_object_class_install_properties(object_class, N_PROPERTIES, obj_properties);
 }
 
@@ -255,9 +277,14 @@ webrtc_gui_init(WebrtcGui *self)
 }
 
 WebrtcGui *
-webrtc_gui_new(WebrtcClient *protocol)
+webrtc_gui_new(WebrtcClient *protocol, WebrtcSettings *settings)
 {
-  WebrtcGui *self = g_object_new(WEBRTC_TYPE_GUI, "protocol", protocol, NULL);
+  WebrtcGui *self = g_object_new(WEBRTC_TYPE_GUI,
+                                 "protocol",
+                                 protocol,
+                                 "settings",
+                                 settings,
+                                 NULL);
 
   return self;
 }
@@ -313,120 +340,12 @@ webrtc_gui_activate(GtkApplication *app, G_GNUC_UNUSED gpointer user_data)
   self->video_grid = gtk_flow_box_new();
   window = get_window("WebRTC Player",
                       app,
-                      get_framed_content(self->button_list, self->video_grid));
+                      get_framed_content(self->button_list, self->video_grid),
+                      self->settings);
 
   /* Todo: Fix video grid */
   g_print("Showing window \n");
   gtk_window_set_default_size(GTK_WINDOW(window), 1200, 720);
   gtk_window_present(GTK_WINDOW(window));
   g_print("Done\n");
-}
-
-gboolean
-webrtc_gui_conf_codec(WebrtcGui *self, gchar **val)
-{
-  GtkStringObject *tmp;
-  const gchar *txt;
-
-  g_return_val_if_fail(self != NULL, FALSE);
-  g_return_val_if_fail(val != NULL, FALSE);
-  g_return_val_if_fail(*val == NULL, FALSE);
-
-  tmp = g_object_get_data(self->app, "codec");
-
-  if (tmp == NULL) {
-    return FALSE;
-  }
-
-  txt = gtk_string_object_get_string(tmp);
-
-  if (g_strcmp0(USE_DEFAULT, txt) == 0) {
-    return FALSE;
-  }
-
-  *val = g_strdup(txt);
-
-  return TRUE;
-}
-gboolean
-webrtc_gui_conf_adaptive(WebrtcGui *self, gboolean *val)
-{
-  GtkStringObject *tmp;
-  const gchar *txt;
-
-  g_return_val_if_fail(self != NULL, FALSE);
-  g_return_val_if_fail(val != NULL, FALSE);
-
-  tmp = g_object_get_data(self->app, "adaptive");
-
-  if (tmp == NULL) {
-    return FALSE;
-  }
-
-  txt = gtk_string_object_get_string(tmp);
-
-  if (g_strcmp0("enabled", txt) == 0) {
-    *val = TRUE;
-    return TRUE;
-  }
-
-  if (g_strcmp0("disabled", txt) == 0) {
-    *val = FALSE;
-    return TRUE;
-  }
-
-  return FALSE;
-}
-
-static gboolean
-get_numeric_config(WebrtcGui *self, const gchar *name, gint *val)
-{
-  gpointer tmp;
-  gint ret;
-
-  g_assert(name);
-  g_assert(val);
-
-  tmp = g_object_get_data(self->app, name);
-
-  if (tmp == NULL) {
-    return FALSE;
-  }
-
-  ret = GPOINTER_TO_INT(tmp);
-
-  if (ret < 0) {
-    return FALSE;
-  }
-
-  *val = ret;
-
-  return TRUE;
-}
-
-gboolean
-webrtc_gui_conf_compression(WebrtcGui *self, gint *val)
-{
-  g_return_val_if_fail(self != NULL, FALSE);
-  g_return_val_if_fail(val != NULL, FALSE);
-
-  return get_numeric_config(self, "compression", val);
-}
-
-gboolean
-webrtc_gui_conf_max_bitrate(WebrtcGui *self, gint *val)
-{
-  g_return_val_if_fail(self != NULL, FALSE);
-  g_return_val_if_fail(val != NULL, FALSE);
-
-  return get_numeric_config(self, "maxBitrateInKbps", val);
-}
-
-gboolean
-webrtc_gui_conf_gop(WebrtcGui *self, gint *val)
-{
-  g_return_val_if_fail(self != NULL, FALSE);
-  g_return_val_if_fail(val != NULL, FALSE);
-
-  return get_numeric_config(self, "keyframeInterval", val);
 }

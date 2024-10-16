@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="utf-8"?>
+
+<schemalist>
+  <enum id="com.github.jsol.webrtc_player.codec">
+    <value nick="none" value="0" />
+    <value nick="opus" value="1" />
+    <value nick="aac" value="2" />
+  </enum>
+
+
+  <schema path="/com/github/jsol/webrtc_player/" id="com.github.jsol.webrtc_player">
+
+    <key name='audio-codec' enum='com.github.jsol.webrtc_player.codec'>
+      <default>'opus'</default>
+      <summary>The codec for audio sent from the BWC</summary>
+    </key>
+
+
+    <key name='max-bitrate' type='x'>
+      <default>16000000</default>
+      <summary>Max bitrate in bits/second</summary>
+    </key>
+
+    <key name='adaptive' type='b'>
+      <default>false</default>
+      <summary>Adaptive bitrate enabled</summary>
+    </key>
+
+    <key name='compression' type='i'>
+      <default>30</default>
+      <summary>Percentage of compression</summary>
+    </key>
+
+    <key name='gop' type='i'>
+      <default>120</default>
+      <summary>Frames between keyframes</summary>
+    </key>
+
+    <key name='force-turn' type='b'>
+      <default>false</default>
+      <summary>Force TURN relay</summary>
+    </key>
+
+  </schema>
+
+</schemalist>

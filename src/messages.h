@@ -1,5 +1,7 @@
 #include <glib.h>
 
+#include "webrtc_settings.h"
+
 enum message_type {
   MSG_TYPE_HELLO = 0,
   MSG_TYPE_AUTH,
@@ -84,8 +86,7 @@ gchar *message_create_hello(const gchar *token);
 gchar *message_create_stream_filter(void);
 gchar *message_create_init_session(const gchar *target,
                                    const gchar *session_id,
-                                   const GHashTable *video_settings,
-                                   const GHashTable *audio_settings,
+                                   WebrtcSettings *settings,
                                    const gchar *token);
 
 gchar *message_create_sdp_answer(const gchar *target,
