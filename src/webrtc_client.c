@@ -1008,3 +1008,9 @@ webrtc_client_send_ice_candidate(WebrtcClient *self,
 
   return TRUE;
 }
+
+const gchar *
+webrtc_client_get_name(WebrtcClient *self)
+{
+  return self->server;
+}

@@ -59,5 +59,7 @@ gboolean webrtc_client_send_ice_candidate(WebrtcClient *self,
                                           const gchar *session_id,
                                           const gchar *ice,
                                           guint line_index);
+const gchar *
+webrtc_client_get_name(WebrtcClient *self);
 
 G_END_DECLS

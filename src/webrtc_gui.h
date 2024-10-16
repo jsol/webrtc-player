@@ -20,7 +20,9 @@ G_DECLARE_FINAL_TYPE(WebrtcGui, webrtc_gui, WEBRTC, GUI, GObject)
 /*
  * Method definitions.
  */
-WebrtcGui *webrtc_gui_new(WebrtcClient *protocol, WebrtcSettings *settings);
+WebrtcGui *webrtc_gui_new(WebrtcSettings *settings);
+
+void webrtc_gui_add_client(WebrtcGui *self, WebrtcClient *client);
 
 void webrtc_gui_add_paintable(WebrtcGui *self,
                               const gchar *id,

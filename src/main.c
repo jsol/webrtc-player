@@ -145,7 +145,9 @@ main(int argc, char **argv)
 
   g_signal_connect(ctx.c, "new-peer", G_CALLBACK(new_peer), NULL);
 
-  ctx.gui = webrtc_gui_new(ctx.c, ctx.settings);
+  ctx.gui = webrtc_gui_new(ctx.settings);
+
+  webrtc_gui_add_client(ctx.gui, ctx.c);
 
   webrtc_client_connect_async(ctx.c);
 
