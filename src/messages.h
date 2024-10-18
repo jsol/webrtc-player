@@ -76,7 +76,10 @@ typedef struct message {
       guint index;
     } ice_candidate;
 
-    /* response has no data atm */
+    struct {
+      gint code;
+      gchar *error_msg;
+    } response;
   } data;
 } message_t;
 

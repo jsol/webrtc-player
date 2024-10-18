@@ -57,6 +57,8 @@ enum client_signals {
   SIG_NEW_CANDIDATE,
   SIG_PEER_GONE,
   SIG_STREAM_GONE,
+  SIG_ERROR,
+  SIG_CONNECTED,
   SIG_LAST
 };
 static guint client_signal_defs[SIG_LAST] = { 0 };
@@ -114,6 +116,14 @@ on_text_message(SoupWebsocketConnection *ws,
     break;
   case MSG_TYPE_RESPONSE:
 
+    if (msg->data.response.code > 0) {
+      g_signal_emit(self,
+                    client_signal_defs[SIG_ERROR],
+                    0,
+                    self->server,
+                    msg->data.response.error_msg);
+    }
+
     g_message("Response received");
     break;
   case MSG_TYPE_HELLO: {
@@ -123,7 +133,7 @@ on_text_message(SoupWebsocketConnection *ws,
       soup_websocket_connection_send_text(self->client, msg);
       g_free(msg);
     }
-
+    g_signal_emit(self, client_signal_defs[SIG_CONNECTED], 0, self->server);
     g_message("Hello received");
   }
 
@@ -857,6 +867,36 @@ webrtc_client_class_init(WebrtcClientClass *klass)
                         G_TYPE_NONE /* return_type */,
                         G_N_ELEMENTS(new_candidate_types) /* n_params */,
                         new_candidate_types /* param_types, or set to NULL */
+          );
+
+  GType error_types[] = { G_TYPE_STRING, G_TYPE_STRING };
+  client_signal_defs[SIG_ERROR] =
+          g_signal_newv("error",
+                        G_TYPE_FROM_CLASS(object_class),
+                        G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE |
+                                G_SIGNAL_NO_HOOKS,
+                        NULL /* closure */,
+                        NULL /* accumulator */,
+                        NULL /* accumulator data */,
+                        NULL /* C marshaller */,
+                        G_TYPE_NONE /* return_type */,
+                        G_N_ELEMENTS(error_types) /* n_params */,
+                        error_types /* param_types, or set to NULL */
+          );
+
+  GType connected_types[] = { G_TYPE_STRING };
+  client_signal_defs[SIG_CONNECTED] =
+          g_signal_newv("connected",
+                        G_TYPE_FROM_CLASS(object_class),
+                        G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE |
+                                G_SIGNAL_NO_HOOKS,
+                        NULL /* closure */,
+                        NULL /* accumulator */,
+                        NULL /* accumulator data */,
+                        NULL /* C marshaller */,
+                        G_TYPE_NONE /* return_type */,
+                        G_N_ELEMENTS(connected_types) /* n_params */,
+                        connected_types /* param_types, or set to NULL */
           );
 
   obj_properties[PROP_SERVER] = g_param_spec_string("server",

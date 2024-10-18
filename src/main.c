@@ -7,10 +7,9 @@
 #include "webrtc_gui.h"
 #include "webrtc_session.h"
 #include "webrtc_settings.h"
-#include "sidebar.h"
+#include "adw_wrapper.h"
 
 struct app_ctx {
-  WebrtcClient *c;
   WebrtcGui *gui;
   GtkApplication *app;
   GHashTable *sessions;
@@ -51,6 +50,7 @@ new_video_sink(struct app_ctx *ctx, const gchar *id)
 
 static void
 on_new_stream(G_GNUC_UNUSED GObject *source,
+              WebrtcClient *c,
               const gchar *target,
               const gchar *session_id,
               struct app_ctx *ctx)
@@ -59,7 +59,7 @@ on_new_stream(G_GNUC_UNUSED GObject *source,
   GstElement *audio_sink;
   WebrtcSession *sess;
 
-  sess = webrtc_session_new(ctx->c, ctx->settings, session_id, target);
+  sess = webrtc_session_new(c, ctx->settings, session_id, target);
   video_sink = new_video_sink(ctx, session_id);
   audio_sink = gst_element_factory_make("autoaudiosink", "audio-output");
 
@@ -114,6 +114,25 @@ on_remove_stream(G_GNUC_UNUSED GObject *source,
   webrtc_gui_remove_paintable(ctx->gui, info->session_id);
 }
 
+static void
+on_connect_client(G_GNUC_UNUSED GObject *src,
+                  const gchar *server,
+                  const gchar *user,
+                  const gchar *password,
+                  struct app_ctx *ctx)
+{
+  WebrtcClient *c;
+
+  c = webrtc_client_new(server, user, password);
+
+  g_signal_connect(c, "new-peer", G_CALLBACK(new_peer), NULL);
+  g_signal_connect(c, "remove-stream", G_CALLBACK(on_remove_stream), ctx);
+
+  webrtc_gui_add_client(ctx->gui, c);
+
+  webrtc_client_connect_async(c);
+}
+
 int
 main(int argc, char **argv)
 {
@@ -139,23 +158,24 @@ main(int argc, char **argv)
                                        g_free,
                                        g_object_unref);
 
-  ctx.c = webrtc_client_new(g_getenv("WEBRTC_HOST"),
-                            g_getenv("WEBRTC_USER"),
-                            g_getenv("WEBRTC_PASS"));
-
-  g_signal_connect(ctx.c, "new-peer", G_CALLBACK(new_peer), NULL);
-
   ctx.gui = webrtc_gui_new(ctx.settings);
-
-  webrtc_gui_add_client(ctx.gui, ctx.c);
-
-  webrtc_client_connect_async(ctx.c);
 
   g_signal_connect(ctx.gui, "new-stream", G_CALLBACK(on_new_stream), &ctx);
   g_signal_connect(ctx.gui, "close-stream", G_CALLBACK(on_close_stream), &ctx);
-  g_signal_connect(ctx.c, "remove-stream", G_CALLBACK(on_remove_stream), &ctx);
+  g_signal_connect(ctx.gui,
+                   "connect-client",
+                   G_CALLBACK(on_connect_client),
+                   &ctx);
 
   ctx.app = get_application();
+
+  if (strlen(g_getenv("WEBRTC_HOST")) > 0) {
+    on_connect_client(NULL,
+                      g_getenv("WEBRTC_HOST"),
+                      g_getenv("WEBRTC_USER"),
+                      g_getenv("WEBRTC_PASS"),
+                      &ctx);
+  }
 
   g_signal_connect(ctx.app,
                    "activate",

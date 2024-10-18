@@ -149,7 +149,7 @@ webrtc_settings_class_init(WebrtcSettingsClass *klass)
   obj_properties[PROP_GOP] = g_param_spec_int("gop",
                                               "Gop",
                                               "Placeholder description.",
-                                              25,
+                                              -1,
                                               500,
                                               120, /* default */
                                               G_PARAM_READWRITE);
@@ -167,7 +167,7 @@ webrtc_settings_class_init(WebrtcSettingsClass *klass)
           g_param_spec_int("compression",
                            "Compression",
                            "Placeholder description.",
-                           0,
+                           -1,
                            100,
                            30,
                            G_PARAM_READWRITE);
@@ -394,7 +394,9 @@ webrtc_settings_parse_opts(WebrtcSettings *self, int argc, char **argv)
     g_message("Waiting for any device to connect");
   }
 
-  if (g_ascii_strcasecmp(audio, "aac") == 0) {
+  if (audio == NULL) {
+    self->audio_codec = WEBRTC_SETTINGS_AUDIO_CODEC_OPUS;
+  } else if (g_ascii_strcasecmp(audio, "aac") == 0) {
     self->audio_codec = WEBRTC_SETTINGS_AUDIO_CODEC_AAC;
   } else if (g_ascii_strcasecmp(audio, "opus") == 0) {
     self->audio_codec = WEBRTC_SETTINGS_AUDIO_CODEC_OPUS;

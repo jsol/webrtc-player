@@ -7,7 +7,7 @@
 #include "webrtc_gui.h"
 #include "webrtc_client.h"
 #include "webrtc_settings.h"
-#include "sidebar.h"
+#include "adw_wrapper.h"
 
 struct _WebrtcGui {
   GObject parent;
@@ -40,6 +40,7 @@ static GParamSpec *obj_properties[N_PROPERTIES] = {
 enum gui_signals {
   SIG_NEW_STREAM = 0,
   SIG_CLOSE_STREAM,
+  SIG_CONNECT_CLIENT,
   SIG_LAST,
 };
 static guint gui_signal_defs[SIG_LAST] = { 0 };
@@ -49,11 +50,18 @@ on_activate(GObject *button, WebrtcGui *self)
 {
   const gchar *target;
   const gchar *session_id;
+  WebrtcClient *client;
 
   target = g_object_get_data(button, "target");
   session_id = g_object_get_data(button, "session_id");
+  client = g_object_get_data(button, "client");
 
-  g_signal_emit(self, gui_signal_defs[SIG_NEW_STREAM], 0, target, session_id);
+  g_signal_emit(self,
+                gui_signal_defs[SIG_NEW_STREAM],
+                0,
+                client,
+                target,
+                session_id);
 }
 
 static void
@@ -69,13 +77,45 @@ on_deactivate(GObject *button, WebrtcGui *self)
 }
 
 static void
+on_client_connected(G_GNUC_UNUSED WebrtcClient *client,
+                    const gchar *host,
+                    WebrtcGui *self)
+{
+  gchar *msg = NULL;
+
+  g_assert(self);
+
+  if (self->app != NULL) {
+    msg = g_strdup_printf("Connected to host %s", host);
+    show_toast(GTK_APPLICATION(self->app), msg);
+    g_free(msg);
+  }
+}
+
+static void
+on_client_error(G_GNUC_UNUSED WebrtcClient *client,
+                const gchar *host,
+                const gchar *error,
+                WebrtcGui *self)
+{
+  gchar *msg = NULL;
+
+  g_assert(self);
+
+  if (self->app != NULL) {
+    msg = g_strdup_printf("Error from host %s: %s", host, error);
+    show_toast(GTK_APPLICATION(self->app), msg);
+    g_free(msg);
+  }
+}
+
+static void
 on_new_stream(WebrtcClient *client,
               struct stream_started *info,
               WebrtcGui *self)
 {
   GtkWidget *button;
-  GtkListBox *list;
-  GtkExpander *expander;
+  GtkWidget *list;
 
   g_assert(self);
   g_assert(info);
@@ -84,6 +124,7 @@ on_new_stream(WebrtcClient *client,
   button = get_button(info->bearer_name,
                       info->subject,
                       info->session_id,
+                      G_OBJECT(client),
                       G_CALLBACK(on_activate),
                       G_CALLBACK(on_deactivate),
                       self);
@@ -93,10 +134,9 @@ on_new_stream(WebrtcClient *client,
                          g_object_ref(client),
                          g_object_unref);
 
-  expander = GTK_EXPANDER(g_object_get_data(G_OBJECT(client), "expander"));
-  list = GTK_LIST_BOX(gtk_expander_get_child(expander));
+  list = g_object_get_data(G_OBJECT(client), "button_list");
 
-  gtk_list_box_append(list, button);
+  add_button_to_list(list, button);
   g_hash_table_insert(self->buttons,
                       g_strdup(info->session_id),
                       g_object_ref(button));
@@ -213,7 +253,13 @@ webrtc_gui_class_init(WebrtcGuiClass *klass)
   object_class->set_property = set_property;
   object_class->get_property = get_property;
 
-  GType new_stream_types[] = { G_TYPE_STRING, G_TYPE_STRING };
+  GType new_stream_types[] = { WEBRTC_TYPE_CLIENT,
+                               G_TYPE_STRING,
+                               G_TYPE_STRING };
+  GType connect_client_types[] = { G_TYPE_STRING,
+                                   G_TYPE_STRING,
+                                   G_TYPE_STRING };
+
   gui_signal_defs[SIG_NEW_STREAM] =
           g_signal_newv("new-stream",
                         G_TYPE_FROM_CLASS(object_class),
@@ -240,6 +286,20 @@ webrtc_gui_class_init(WebrtcGuiClass *klass)
                         G_TYPE_NONE /* return_type */,
                         G_N_ELEMENTS(new_stream_types) /* n_params */,
                         new_stream_types /* param_types, or set to NULL */
+          );
+
+  gui_signal_defs[SIG_CONNECT_CLIENT] =
+          g_signal_newv("connect-client",
+                        G_TYPE_FROM_CLASS(object_class),
+                        G_SIGNAL_RUN_LAST | G_SIGNAL_NO_RECURSE |
+                                G_SIGNAL_NO_HOOKS,
+                        NULL /* closure */,
+                        NULL /* accumulator */,
+                        NULL /* accumulator data */,
+                        NULL /* C marshaller */,
+                        G_TYPE_NONE /* return_type */,
+                        G_N_ELEMENTS(connect_client_types) /* n_params */,
+                        connect_client_types /* param_types, or set to NULL */
           );
 
   obj_properties[PROP_PROTOCOL] =
@@ -288,30 +348,31 @@ add_to_sidebar(gpointer data, gpointer user_data)
 {
   WebrtcClient *client = WEBRTC_CLIENT(data);
   WebrtcGui *self = WEBRTC_GUI(user_data);
-  GtkExpander *expander;
   GtkWidget *button_list;
 
   g_assert(client);
   g_assert(self);
 
-  button_list = gtk_list_box_new();
-  expander = GTK_EXPANDER(gtk_expander_new(webrtc_client_get_name(client)));
-
-  gtk_expander_set_child(expander, button_list);
+  button_list = get_button_list(webrtc_client_get_name(client), "");
 
   g_signal_connect(client, "new-stream", G_CALLBACK(on_new_stream), self);
   g_signal_connect(client, "remove-stream", G_CALLBACK(on_stream_end), self);
+  g_signal_connect(client, "connected", G_CALLBACK(on_client_connected), self);
+  g_signal_connect(client, "error", G_CALLBACK(on_client_error), self);
 
   g_object_set_data_full(G_OBJECT(client),
-                         "expander",
-                         g_object_ref(expander),
+                         "button_list",
+                         g_object_ref(button_list),
                          g_object_unref);
 
-  gtk_box_append(GTK_BOX(self->sidebar), GTK_WIDGET(expander));
+  gtk_list_box_append(GTK_LIST_BOX(self->sidebar), GTK_WIDGET(button_list));
 }
 void
 webrtc_gui_add_client(WebrtcGui *self, WebrtcClient *client)
 {
+  g_return_if_fail(self != NULL);
+  g_return_if_fail(client != NULL);
+
   self->clients = g_list_append(self->clients, g_object_ref(client));
 
   if (self->sidebar != NULL) {
@@ -365,12 +426,13 @@ webrtc_gui_activate(GtkApplication *app, G_GNUC_UNUSED gpointer user_data)
   self->app = G_OBJECT(app);
 
   g_print("Setting up rest of UI\n");
-  self->sidebar = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
+  self->sidebar = gtk_list_box_new();
   self->video_grid = gtk_flow_box_new();
   window = get_window("WebRTC Player",
                       app,
                       get_framed_content(self->sidebar, self->video_grid),
-                      self->settings);
+                      self->settings,
+                      G_OBJECT(self));
 
   g_list_foreach(self->clients, add_to_sidebar, self);
 

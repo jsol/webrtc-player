@@ -31,12 +31,12 @@ extra_cflags = ['-W', '-Wformat=2', '-Winline', '-ggdb',
 
 sources = ([
   'main.c',
+  'adw_wrapper.c',
   'messages.c',
   'webrtc_client.c',
   'webrtc_session.c',
   'webrtc_settings.c',
   'webrtc_gui.c',
-  'sidebar.c',
 ])
 
 sources_filewriter = ([

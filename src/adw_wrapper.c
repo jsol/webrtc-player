@@ -2,7 +2,7 @@
 #include <glib.h>
 #include <gtk/gtk.h>
 
-#include "sidebar.h"
+#include "adw_wrapper.h"
 
 #include "webrtc_settings.h"
 
@@ -74,6 +74,7 @@ GtkWidget *
 get_button(const gchar *title,
            const gchar *subtitle,
            const gchar *session_id,
+           GObject *client,
            GCallback activate,
            GCallback deactivate,
            gpointer user_data)
@@ -93,6 +94,7 @@ get_button(const gchar *title,
   g_object_set_data(G_OBJECT(button), "activate", activate);
   g_object_set_data(G_OBJECT(button), "deactivate", deactivate);
 
+  g_object_set_data(G_OBJECT(button), "client", client);
   g_object_set_data_full(G_OBJECT(button),
                          "target",
                          g_strdup(subtitle),
@@ -133,6 +135,7 @@ GtkWidget *
 get_button(const gchar *title,
            const gchar *subtitle,
            const gchar *session_id,
+           GObject *client,
            GCallback activate,
            GCallback deactivate,
            gpointer user_data)
@@ -162,6 +165,7 @@ get_button(const gchar *title,
   g_object_set_data(G_OBJECT(onoff), "activate", activate);
   g_object_set_data(G_OBJECT(onoff), "deactivate", deactivate);
 
+  g_object_set_data(G_OBJECT(onoff), "client", client);
   g_object_set_data_full(G_OBJECT(onoff), "target", g_strdup(subtitle), g_free);
   g_object_set_data_full(G_OBJECT(onoff),
                          "session_id",
@@ -177,6 +181,27 @@ get_button(const gchar *title,
 }
 
 #endif
+
+GtkWidget *
+get_button_list(const gchar *title, const gchar *subtitle)
+{
+  GtkWidget *row;
+
+  row = adw_expander_row_new();
+
+  adw_preferences_row_set_title(ADW_PREFERENCES_ROW(row), title);
+  adw_expander_row_set_subtitle(ADW_EXPANDER_ROW(row), subtitle);
+
+  adw_expander_row_set_expanded(ADW_EXPANDER_ROW(row), TRUE);
+
+  return row;
+}
+
+void
+add_button_to_list(GtkWidget *list, GtkWidget *button)
+{
+  adw_expander_row_add_row(ADW_EXPANDER_ROW(list), button);
+}
 
 static void
 on_selected_change(GObject *self,
@@ -425,10 +450,121 @@ pref_menu_cb(G_GNUC_UNUSED GSimpleAction *simple_action,
   gtk_window_present(GTK_WINDOW(pref_window));
 }
 
+static GtkEditable *
+add_connect_string(AdwPreferencesGroup *group,
+                   const gchar *title,
+                   gboolean apply)
+{
+  GtkWidget *input;
+#if ADW_MINOR_VERSION >= 2 && ADW_MAJOR_VERSION >= 1
+
+  input = adw_entry_row_new();
+
+  adw_entry_row_set_show_apply_button(ADW_ENTRY_ROW(input), apply);
+
+  adw_preferences_row_set_title(ADW_PREFERENCES_ROW(input), title);
+
+  adw_preferences_group_add(group, input);
+#else
+  GtkWidget *row;
+  GtkWidget *box;
+  GtkWidget *label;
+
+  row = gtk_list_box_row_new();
+  input = gtk_entry_new();
+  label = gtk_label_new(title);
+  box = gtk_box_new(GTK_ORIENTATION_HORIZONTAL, 10);
+
+  gtk_box_append(GTK_BOX(box), label);
+  gtk_box_append(GTK_BOX(box), input);
+  gtk_list_box_row_set_child(GTK_LIST_BOX_ROW(row), box);
+
+  g_object_set_data(G_OBJECT(input), "pref_name", (GINT_TO_POINTER(pref_name));
+  g_object_set_data(G_OBJECT(input), "max_input", GINT_TO_POINTER(max));
+
+  g_signal_connect(input, "changed", G_CALLBACK(numeric_input_changed), data);
+  adw_preferences_group_add(group, row);
+
+#endif
+  return GTK_EDITABLE(input);
+}
+
+static void
+connect_to_server(GObject *button, GObject *emit)
+{
+  GtkWindow *pref_window;
+  GtkEditable *server;
+  GtkEditable *user;
+  GtkEditable *pass;
+
+  pref_window = g_object_get_data(button, "pref_window");
+
+  server = g_object_get_data(button, "server");
+  user = g_object_get_data(button, "user");
+  pass = g_object_get_data(button, "password");
+
+  g_signal_emit_by_name(emit,
+                        "connect-client",
+                        gtk_editable_get_text(server),
+                        gtk_editable_get_text(user),
+                        gtk_editable_get_text(pass));
+
+  gtk_window_close(pref_window);
+}
+
+static void
+client_menu_cb(G_GNUC_UNUSED GSimpleAction *simple_action,
+               G_GNUC_UNUSED GVariant *parameter,
+               gpointer *data)
+{
+  GtkWidget *pref_window;
+  GtkWidget *pref_page;
+  GtkWidget *connect_group;
+  GtkEditable *server;
+  GtkEditable *user;
+  GtkEditable *password;
+
+  connect_group = adw_preferences_group_new();
+
+  user = add_connect_string(ADW_PREFERENCES_GROUP(connect_group),
+                            "User",
+                            FALSE);
+  password = add_connect_string(ADW_PREFERENCES_GROUP(connect_group),
+                                "Password",
+                                FALSE);
+
+  server = add_connect_string(ADW_PREFERENCES_GROUP(connect_group),
+                              "Server",
+                              TRUE);
+
+  adw_preferences_group_set_title(ADW_PREFERENCES_GROUP(connect_group),
+                                  "Connect to new server");
+
+  g_object_set_data(G_OBJECT(server), "server", server);
+  g_object_set_data(G_OBJECT(server), "user", user);
+  g_object_set_data(G_OBJECT(server), "password", password);
+
+  g_signal_connect(server, "apply", G_CALLBACK(connect_to_server), data);
+
+  /* Show preference page */
+  pref_page = adw_preferences_page_new();
+  pref_window = adw_preferences_window_new();
+
+  adw_preferences_page_add(ADW_PREFERENCES_PAGE(pref_page),
+                           ADW_PREFERENCES_GROUP(connect_group));
+
+  adw_preferences_window_add(ADW_PREFERENCES_WINDOW(pref_window),
+                             ADW_PREFERENCES_PAGE(pref_page));
+
+  g_object_set_data(G_OBJECT(server), "pref_window", pref_window);
+  gtk_window_present(GTK_WINDOW(pref_window));
+}
+
 static void
 build_app_menu(GtkMenuButton *menu_button,
                GtkApplication *app,
-               WebrtcSettings *settings)
+               WebrtcSettings *settings,
+               GObject *emit)
 {
   GMenu *menubar = g_menu_new();
   GMenuItem *menu_item_menu;
@@ -438,9 +574,17 @@ build_app_menu(GtkMenuButton *menu_button,
   g_menu_append_item(menubar, menu_item_menu);
   g_object_unref(menu_item_menu);
 
+  menu_item_menu = g_menu_item_new("Add server", "app.add_client");
+  g_menu_append_item(menubar, menu_item_menu);
+  g_object_unref(menu_item_menu);
+
   act = g_simple_action_new("pref", NULL);
   g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(act));
   g_signal_connect(act, "activate", G_CALLBACK(pref_menu_cb), settings);
+
+  act = g_simple_action_new("add_client", NULL);
+  g_action_map_add_action(G_ACTION_MAP(app), G_ACTION(act));
+  g_signal_connect(act, "activate", G_CALLBACK(client_menu_cb), emit);
 
   gtk_menu_button_set_menu_model((menu_button), G_MENU_MODEL(menubar));
 }
@@ -449,22 +593,25 @@ GtkWidget *
 get_window(const gchar *title_str,
            GtkApplication *app,
            GtkWidget *content,
-           WebrtcSettings *settings)
+           WebrtcSettings *settings,
+           GObject *emit)
 {
   GtkWidget *title;
   GtkWidget *pref_menu;
   GtkWidget *header;
   GtkWidget *window;
   GtkWidget *box;
+  GtkWidget *toast_overlay;
 
   window = adw_application_window_new(app);
+  toast_overlay = adw_toast_overlay_new();
   box = gtk_box_new(GTK_ORIENTATION_VERTICAL, 10);
 
   title = adw_window_title_new(title_str, NULL);
   pref_menu = gtk_menu_button_new();
   header = adw_header_bar_new();
 
-  build_app_menu(GTK_MENU_BUTTON(pref_menu), app, settings);
+  build_app_menu(GTK_MENU_BUTTON(pref_menu), app, settings, emit);
 
   gtk_menu_button_set_direction(GTK_MENU_BUTTON(pref_menu), GTK_ARROW_NONE);
   adw_header_bar_set_title_widget(ADW_HEADER_BAR(header), title);
@@ -473,9 +620,27 @@ get_window(const gchar *title_str,
   gtk_box_append(GTK_BOX(box), header);
   gtk_box_append(GTK_BOX(box), content);
 
-  adw_application_window_set_content(ADW_APPLICATION_WINDOW(window), box);
+  adw_toast_overlay_set_child(ADW_TOAST_OVERLAY(toast_overlay), box);
+
+  g_object_set_data_full(G_OBJECT(app),
+                         "toast_overlay",
+                         g_object_ref(toast_overlay),
+                         g_object_unref);
+
+  adw_application_window_set_content(ADW_APPLICATION_WINDOW(window),
+                                     toast_overlay);
 
   return window;
+}
+
+void
+show_toast(GtkApplication *app, const gchar *msg)
+{
+  AdwToastOverlay *toast_overlay;
+
+  toast_overlay =
+          ADW_TOAST_OVERLAY(g_object_get_data(G_OBJECT(app), "toast_overlay"));
+  adw_toast_overlay_add_toast(toast_overlay, adw_toast_new(msg));
 }
 
 GtkApplication *

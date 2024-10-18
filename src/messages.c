@@ -84,12 +84,21 @@ parse_ice_candidate_msg(JsonObject *data)
 static message_t *
 parse_response_msg(JsonObject *data)
 {
+  JsonObject *error;
   message_t *res;
 
   res = g_malloc0(sizeof(*res));
   res->type = MSG_TYPE_RESPONSE;
 
   res->session_id = g_strdup(json_object_get_string_member(data, "sessionId"));
+
+  if (json_object_has_member(data, "error")) {
+    error = json_object_get_object_member(data, "error");
+    res->data.response.code =
+            json_object_get_int_member_with_default(error, "code", 0);
+    res->data.response.error_msg = g_strdup(
+            json_object_get_string_member_with_default(error, "message", ""));
+  }
 
   return res;
 }
@@ -777,19 +786,23 @@ message_create_init_session(const gchar *target,
                                  "adaptive",
                                  webrtc_settings_video_adaptive(settings));
 
-  json_object_set_int_member(video,
-                             "max-bitrate",
-                             webrtc_settings_video_max_bitrate(settings));
+  if (webrtc_settings_video_max_bitrate(settings) > 0) {
+    json_object_set_int_member(video,
+                               "max-bitrate",
+                               webrtc_settings_video_max_bitrate(settings));
+  }
+  if (webrtc_settings_video_gop(settings) > 0) {
+    json_object_set_int_member(video,
+                               "gop",
+                               webrtc_settings_video_gop(settings));
+  }
 
-  json_object_set_int_member(video,
-                             "gop",
-                             webrtc_settings_video_gop(settings));
+  if (webrtc_settings_video_compression(settings) > 0) {
+    json_object_set_int_member(video,
+                               "compression",
+                               webrtc_settings_video_compression(settings));
+  }
 
-  json_object_set_int_member(video,
-                             "compression",
-                             webrtc_settings_video_compression(settings));
-
-  
   json_object_set_string_member(params, "type", "live");
   json_object_set_object_member(params, "videoReceive", video);
   if (audio != NULL) {
